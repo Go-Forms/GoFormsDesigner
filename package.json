@@ -129,7 +129,7 @@
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
     "watch": "npm run build -- --watch",
     "package": "vsce package",
-    "test": "node --test test/*.test.js"
+    "test": "node --test"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

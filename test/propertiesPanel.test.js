@@ -10,7 +10,7 @@ const assert = require('node:assert');
 const { test } = require('node:test');
 const path = require('node:path');
 
-const { install } = require('./domShim');
+const { install } = require('../testlib/domShim');
 
 /** catalog is a trimmed stand-in for the Go tool's `catalog` output. */
 const catalog = {

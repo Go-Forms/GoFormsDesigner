@@ -1,5 +1,5 @@
 # The extension is two halves that have to be checked separately: the
-# TypeScript host (src/, tested through test/*.test.js against the DOM shim)
+# TypeScript host (src/, tested through test/ against the DOM shim in testlib/)
 # and the Go helper CLI it shells out to (tool/), which is where all the
 # parsing and rewriting of designer files actually happens.
 name: CI

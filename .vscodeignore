@@ -2,6 +2,7 @@
 .gitignore
 .vscode/**
 .vscode-test/**
+testlib/**
 out/**
 src/**
 *.ts
