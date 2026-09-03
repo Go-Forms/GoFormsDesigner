@@ -1,0 +1,141 @@
+{
+  "name": "goforms-designer",
+  "displayName": "GoForms Designer",
+  "description": "Visual WinForms-style designer for GoForms: drag-and-drop editing of *-designer.go files, plus project/form scaffolding commands.",
+  "version": "0.7.0",
+  "publisher": "goforms",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Visualization",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:go"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "goforms.designer",
+        "displayName": "GoForms Designer",
+        "selector": [
+          {
+            "filenamePattern": "*-designer.go"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "goforms.createProject",
+        "title": "GoForms: Create New Project...",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.newForm",
+        "title": "GoForms: New Form...",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.openDesigner",
+        "title": "GoForms: Open Visual Designer",
+        "category": "GoForms",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "goforms.openAsText",
+        "title": "GoForms: Open as Text",
+        "category": "GoForms",
+        "icon": "$(code)"
+      },
+      {
+        "command": "goforms.setFrameworkPath",
+        "title": "GoForms: Set Framework Path...",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.tidyDesignerFile",
+        "title": "GoForms: Tidy Designer File",
+        "category": "GoForms",
+        "icon": "$(sparkle)"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "goforms.newForm",
+          "when": "explorerResourceIsFolder",
+          "group": "goforms@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "goforms.createProject"
+        },
+        {
+          "command": "goforms.newForm"
+        },
+        {
+          "command": "goforms.openDesigner",
+          "when": "resourceFilename =~ /-designer\\.go$/"
+        },
+        {
+          "command": "goforms.openAsText",
+          "when": "resourceFilename =~ /-designer\\.go$/"
+        },
+        {
+          "command": "goforms.setFrameworkPath"
+        },
+        {
+          "command": "goforms.tidyDesignerFile",
+          "when": "resourceFilename =~ /-designer\\.go$/"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "goforms.tidyDesignerFile",
+          "when": "resourceFilename =~ /-designer\\.go$/",
+          "group": "navigation@3"
+        },
+        {
+          "command": "goforms.openAsText",
+          "when": "activeCustomEditorId == 'goforms.designer'",
+          "group": "navigation"
+        },
+        {
+          "command": "goforms.openDesigner",
+          "when": "resourceFilename =~ /-designer\\.go$/ && activeCustomEditorId != 'goforms.designer'",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "GoForms Designer",
+      "properties": {
+        "goforms.frameworkPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to a local GoForms checkout (the folder containing go.mod for the goforms module). Used as the `replace goforms => ...` target when scaffolding new projects. Leave empty to be prompted the first time it's needed."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
+    "watch": "npm run build -- --watch",
+    "package": "vsce package",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.4.0",
+    "@vscode/vsce": "^2.24.0"
+  }
+}

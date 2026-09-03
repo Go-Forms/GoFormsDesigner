@@ -1,0 +1,1592 @@
+/* designer.css - styles for the GoForms Designer webview.
+   Uses VS Code's standard theme CSS variables throughout so the designer
+   matches the user's light/dark/high-contrast theme instead of looking
+   like a foreign app pasted into the editor. */
+
+* {
+	box-sizing: border-box;
+}
+
+html, body {
+	height: 100%;
+	margin: 0;
+	padding: 0;
+}
+
+body {
+	color: var(--vscode-foreground);
+	background: var(--vscode-editor-background);
+	font-family: var(--vscode-font-family, sans-serif);
+	font-size: var(--vscode-font-size, 13px);
+	overflow: hidden;
+}
+
+#app {
+	display: flex;
+	flex-direction: column;
+	height: 100vh;
+}
+
+/* ---------- Side panel: Controls / Properties tabs ---------- */
+
+#side-panel {
+	flex: 0 0 270px;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	border-left: 1px solid var(--vscode-panel-border, #444);
+	background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+#side-tabs {
+	flex: 0 0 auto;
+	display: flex;
+	border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+
+.side-tab {
+	flex: 1 1 0;
+	border: none;
+	border-bottom: 2px solid transparent;
+	background: transparent;
+	color: var(--vscode-foreground);
+	opacity: 0.7;
+	padding: 7px 8px;
+	font-size: 11px;
+	font-family: var(--vscode-font-family, sans-serif);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	cursor: pointer;
+}
+
+.side-tab:hover {
+	opacity: 1;
+	background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.12));
+}
+
+.side-tab.active {
+	opacity: 1;
+	font-weight: 600;
+	border-bottom-color: var(--vscode-focusBorder, #007fd4);
+}
+
+/* Both bodies scroll independently, so a long toolbox never pushes the
+   properties out of reach. */
+.side-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 10px 12px;
+}
+
+.side-body[hidden] {
+	display: none;
+}
+
+/* ---------- Toolbox (Controls tab) ---------- */
+
+.toolbox-search {
+	width: 100%;
+	box-sizing: border-box;
+	margin-bottom: 8px;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 2px;
+	padding: 4px 6px;
+	font-size: 12px;
+	font-family: var(--vscode-font-family, sans-serif);
+}
+
+.toolbox-group {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	opacity: 0.65;
+	margin: 10px 0 4px;
+	border-bottom: 1px solid var(--vscode-panel-border, #444);
+	padding-bottom: 3px;
+}
+
+.toolbox-group:first-of-type {
+	margin-top: 0;
+}
+
+/* One control per row, as in the Visual Studio toolbox: the names are what
+   you scan for, and a wrapped grid of buttons made them hard to read. */
+.toolbox-item {
+	display: block;
+	width: 100%;
+	text-align: left;
+	border: 1px solid transparent;
+	background: transparent;
+	color: var(--vscode-foreground);
+	padding: 3px 6px;
+	border-radius: 3px;
+	cursor: pointer;
+	font-size: 12px;
+	font-family: var(--vscode-font-family, sans-serif);
+}
+
+.toolbox-item:hover {
+	background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.16));
+	border-color: var(--vscode-panel-border, #555);
+}
+
+/* ---------- Main layout ---------- */
+
+#main {
+	flex: 1 1 auto;
+	display: flex;
+	min-height: 0;
+}
+
+#canvas-wrap {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+#canvas-scroll {
+	flex: 1 1 auto;
+	overflow: auto;
+	padding: 24px;
+	background:
+		linear-gradient(45deg, rgba(128,128,128,0.06) 25%, transparent 25%),
+		linear-gradient(-45deg, rgba(128,128,128,0.06) 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, rgba(128,128,128,0.06) 75%),
+		linear-gradient(-45deg, transparent 75%, rgba(128,128,128,0.06) 75%);
+	background-size: 20px 20px;
+	background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+}
+
+#form-canvas {
+	position: relative;
+	background: var(--vscode-editorWidget-background, #f3f3f3);
+	border: 1px solid var(--vscode-panel-border, #666);
+	box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+	outline: none;
+}
+
+#form-canvas .form-titlebar {
+	position: absolute;
+	top: -22px;
+	left: 0;
+	right: 0;
+	height: 20px;
+	font-size: 11px;
+	line-height: 20px;
+	padding: 0 6px;
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.8;
+}
+
+/* ---------- Controls ---------- */
+
+.ctrl {
+	/* No padding/border-affecting box model here: child controls of a
+	   container are positioned absolute using the exact parent-relative
+	   x/y the Go tool reports, so this element's padding edge must line
+	   up with its border edge (box-sizing: border-box, zero padding) or
+	   children would visually drift from their real coordinates. All
+	   label/tag decoration below is an absolutely-positioned overlay
+	   instead of using flow layout + padding. */
+	position: absolute;
+	border: 1px solid var(--vscode-panel-border, #888);
+	background: var(--vscode-input-background, #ffffff10);
+	color: var(--vscode-foreground);
+	overflow: hidden;
+	cursor: move;
+	user-select: none;
+	font-size: 12px;
+	padding: 0;
+}
+
+.ctrl.is-container {
+	background: rgba(127, 127, 127, 0.08);
+}
+
+.ctrl .ctrl-label {
+	position: absolute;
+	top: 2px;
+	left: 3px;
+	right: 3px;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	pointer-events: none;
+	z-index: 1;
+}
+
+.ctrl .ctrl-tag {
+	display: inline-block;
+	font-size: 9px;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	padding: 0 4px;
+	border-radius: 2px;
+	background: var(--vscode-badge-background, #4d4d4d);
+	color: var(--vscode-badge-foreground, #fff);
+	opacity: 0.85;
+	align-self: flex-start;
+	pointer-events: none;
+}
+
+.ctrl .ctrl-text {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	pointer-events: none;
+	opacity: 0.9;
+}
+
+/* ---------- Realistic per-type control rendering ----------
+   .ctrl-content is the single child that fills a control's box with a
+   type-specific "what it'll actually look like" rendering, built by
+   renderControlContent() in designer.js. It never intercepts mouse events
+   (pointer-events: none) so drag/resize/select on the outer .ctrl element
+   keeps working exactly as before. */
+
+.ctrl .ctrl-content {
+	width: 100%;
+	height: 100%;
+	box-sizing: border-box;
+	overflow: hidden;
+	pointer-events: none;
+	font-size: 11px;
+	color: var(--vscode-foreground);
+}
+
+/* Label / LinkLabel: no visible box, just text. */
+.ctrl.type-Label,
+.ctrl.type-LinkLabel {
+	border-color: transparent;
+	background: transparent;
+}
+
+.cc-label {
+	display: flex;
+	align-items: center;
+	padding: 0 3px;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.cc-linklabel {
+	display: flex;
+	align-items: center;
+	padding: 0 3px;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	color: var(--vscode-textLink-foreground, #3794ff);
+	text-decoration: underline;
+}
+
+/* Button / ColorPickerButton: filled, raised-looking button face. */
+.ctrl.type-Button,
+.ctrl.type-ColorPickerButton {
+	border-color: transparent;
+	background: transparent;
+}
+
+.cc-button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 3px;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+	padding: 0 6px;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	text-align: center;
+}
+
+.cc-colorpicker {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border-radius: 3px;
+	padding: 0 8px;
+}
+
+.cc-colorpicker-swatch {
+	flex: 0 0 auto;
+	width: 12px;
+	height: 12px;
+	border-radius: 2px;
+	border: 1px solid rgba(0, 0, 0, 0.35);
+	background: #4c97ff;
+}
+
+.cc-colorpicker-text {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+/* TextBox / ComboBox / NumericUpDown / DateTimePicker: input-like boxes. */
+.ctrl.type-TextBox,
+.ctrl.type-ComboBox,
+.ctrl.type-NumericUpDown,
+.ctrl.type-DateTimePicker {
+	border-color: var(--vscode-input-border, var(--vscode-panel-border, #888));
+	background: var(--vscode-input-background);
+}
+
+.cc-textbox {
+	display: flex;
+	align-items: center;
+	padding: 0 6px;
+}
+
+.cc-textbox-multiline {
+	align-items: flex-start;
+	padding-top: 4px;
+}
+
+.cc-textbox-text {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	color: var(--vscode-input-foreground);
+}
+
+.cc-textbox-multiline .cc-textbox-text {
+	white-space: pre-wrap;
+}
+
+.cc-textbox-text.placeholder,
+.cc-combobox-text.placeholder,
+.cc-dtp-text.placeholder {
+	color: var(--vscode-input-placeholderForeground, #999);
+	font-style: italic;
+}
+
+/* CheckBox / RadioButton: glyph + label, no boxy background. */
+.ctrl.type-CheckBox,
+.ctrl.type-RadioButton {
+	border-color: transparent;
+	background: transparent;
+}
+
+.cc-checklike {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 0 3px;
+}
+
+.cc-glyph-box {
+	flex: 0 0 auto;
+	width: 13px;
+	height: 13px;
+	border: 1px solid var(--vscode-checkbox-border, var(--vscode-input-border, #888));
+	background: var(--vscode-checkbox-background, var(--vscode-input-background));
+	border-radius: 2px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 10px;
+	line-height: 1;
+	color: var(--vscode-checkbox-foreground, var(--vscode-foreground));
+}
+
+.cc-glyph-box.checked {
+	background: var(--vscode-checkbox-selectBackground, var(--vscode-button-background));
+	border-color: var(--vscode-checkbox-selectBorder, var(--vscode-focusBorder, #0078d4));
+}
+
+.cc-glyph-box.cc-radio {
+	border-radius: 50%;
+}
+
+.cc-radio-dot {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--vscode-checkbox-foreground, var(--vscode-foreground));
+	display: none;
+}
+
+.cc-glyph-box.cc-radio.checked .cc-radio-dot {
+	display: block;
+	background: var(--vscode-button-foreground, #fff);
+}
+
+.cc-checklike-label {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+/* ComboBox */
+.cc-combobox {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 0 4px;
+}
+
+.cc-combobox-text {
+	flex: 1 1 auto;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.cc-combobox-arrow {
+	flex: 0 0 auto;
+	font-size: 8px;
+	opacity: 0.75;
+}
+
+/* ListBox */
+.cc-listbox {
+	display: flex;
+	flex-direction: column;
+}
+
+.cc-listbox-row {
+	flex: 0 0 auto;
+	padding: 2px 6px;
+	font-size: 13px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	border-bottom: 1px solid rgba(127, 127, 127, 0.15);
+}
+
+/* GroupBox: legend overlapping the top border, classic designer trick.
+   Sized/weighted to match GoForms' actual GroupBox title (a widget.Card
+   title, which Fyne renders noticeably larger/bolder than body text - the
+   original 10px/regular-weight here read as much smaller than the real
+   rendered form). */
+/* The wrapper must not draw its own border or fill for a GroupBox: the
+   segments below are the frame, and the real control has no background.
+   This has to come after .ctrl.is-container to win on equal specificity. */
+.ctrl.type-GroupBox {
+	border-color: transparent;
+	background: transparent;
+}
+
+/* GroupBox: five border segments plus a caption, positioned by
+   renderGroupBox to mirror the runtime's own frame geometry. */
+.cc-groupbox {
+	position: relative;
+	overflow: visible;
+}
+
+.cc-gb-seg {
+	position: absolute;
+	background: var(--vscode-panel-border, #888);
+	opacity: 0.9;
+}
+
+.cc-gb-caption {
+	position: absolute;
+	top: 0;
+	display: flex;
+	align-items: center;
+	font-weight: 600;
+	white-space: nowrap;
+	color: var(--vscode-foreground);
+	z-index: 2;
+}
+
+/* PictureBox */
+.cc-picturebox {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.7;
+}
+
+/* ProgressBar */
+.cc-progressbar {
+	padding: 2px;
+}
+
+.cc-progressbar-fill {
+	height: 100%;
+	background: var(--vscode-progressBar-background, var(--vscode-charts-blue, #3794ff));
+	border-radius: 1px;
+}
+
+/* TrackBar: no boxy background, just groove + thumb. */
+.ctrl.type-TrackBar {
+	border-color: transparent;
+	background: transparent;
+}
+
+.cc-trackbar {
+	position: relative;
+}
+
+.cc-trackbar-track {
+	position: absolute;
+	left: 4px;
+	right: 4px;
+	top: 50%;
+	height: 3px;
+	transform: translateY(-50%);
+	background: var(--vscode-scrollbarSlider-background, rgba(127, 127, 127, 0.4));
+	border-radius: 2px;
+}
+
+.cc-trackbar-thumb {
+	position: absolute;
+	top: 50%;
+	width: 10px;
+	height: 16px;
+	transform: translate(-50%, -50%);
+	background: var(--vscode-button-background);
+	border: 1px solid var(--vscode-focusBorder, transparent);
+	border-radius: 2px;
+}
+
+/* NumericUpDown */
+.cc-numericupdown {
+	display: flex;
+	align-items: stretch;
+}
+
+.cc-nud-text {
+	flex: 1 1 auto;
+	display: flex;
+	align-items: center;
+	padding: 0 4px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.cc-nud-arrows {
+	flex: 0 0 14px;
+	display: flex;
+	flex-direction: column;
+	border-left: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+}
+
+.cc-nud-arrows span {
+	flex: 1 1 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 7px;
+	line-height: 1;
+	opacity: 0.8;
+}
+
+/* DateTimePicker */
+.cc-datetimepicker {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 4px;
+	padding: 0 6px;
+}
+
+.cc-dtp-text {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.cc-dtp-icon {
+	flex: 0 0 auto;
+	font-size: 11px;
+	opacity: 0.85;
+}
+
+/* ListView: header row + data grid. */
+.cc-listview {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+
+.cc-listview-header,
+.cc-listview-row {
+	display: grid;
+}
+
+.cc-listview-header {
+	flex: 0 0 auto;
+	background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.15));
+	border-bottom: 1px solid var(--vscode-panel-border, #888);
+	font-weight: 600;
+}
+
+.cc-listview-body {
+	flex: 1 1 auto;
+	overflow: hidden;
+}
+
+.cc-listview-row {
+	border-bottom: 1px solid rgba(127, 127, 127, 0.12);
+}
+
+.cc-listview-cell {
+	padding: 2px 4px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	border-right: 1px solid rgba(127, 127, 127, 0.08);
+}
+
+/* DataGridView: header + rows, sized by the port of the runtime's column
+   fitting in designer.js. Cell text is 13px to match how Fyne's default
+   text size lands at runtime (same tuning as .cc-listbox-row). */
+.cc-grid {
+	display: block;
+	overflow: hidden;
+	position: relative;
+	font-size: 13px;
+	background: var(--vscode-editor-background, #1e1e1e);
+}
+
+/* With vertical scrolling off the control legitimately extends past the
+   box the designer drew, so let it paint outside its bounds. */
+.cc-grid.cc-grid-autoheight {
+	overflow: visible;
+	z-index: 1;
+}
+
+.cc-grid-viewport {
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+}
+
+.cc-grid-table {
+	display: flex;
+	flex-direction: column;
+}
+
+.cc-grid-header,
+.cc-grid-row {
+	display: grid;
+	flex: 0 0 auto;
+}
+
+.cc-grid-header {
+	background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.15));
+	border-bottom: 1px solid var(--vscode-panel-border, #888);
+	font-weight: 600;
+}
+
+.cc-grid-row {
+	border-bottom: 1px solid rgba(127, 127, 127, 0.16);
+}
+
+.cc-grid-cell {
+	padding: 0 4px;
+	display: flex;
+	align-items: center;
+	overflow: hidden;
+	white-space: pre;
+	text-overflow: ellipsis;
+	border-right: 1px solid rgba(127, 127, 127, 0.12);
+}
+
+/* Frozen columns stay put while the rest scroll, so mark them. */
+.cc-grid-frozen {
+	background: var(--vscode-list-inactiveSelectionBackground, rgba(127, 127, 127, 0.1));
+}
+
+.cc-grid-nolines .cc-grid-cell,
+.cc-grid-nolines .cc-grid-row {
+	border-color: transparent;
+}
+
+/* A read-only grid renders its cells as plain text rather than editors. */
+.cc-grid-readonly .cc-grid-row .cc-grid-cell {
+	opacity: 0.75;
+}
+
+/* Sample rows are stand-ins for absent AddRow calls - keep them visibly
+   provisional so they're never mistaken for real data. */
+.cc-grid-sample .cc-grid-row .cc-grid-cell {
+	opacity: 0.45;
+	font-style: italic;
+}
+
+.cc-grid-vscroll,
+.cc-grid-hscroll {
+	position: absolute;
+	background: rgba(127, 127, 127, 0.12);
+}
+
+.cc-grid-vscroll {
+	top: 0;
+	right: 0;
+	width: 16px;
+	height: 100%;
+}
+
+.cc-grid-hscroll {
+	left: 0;
+	bottom: 0;
+	height: 16px;
+	width: 100%;
+}
+
+.cc-grid-vscroll .cc-grid-thumb {
+	margin: 2px;
+	width: 12px;
+	height: 40%;
+	border-radius: 6px;
+	background: rgba(127, 127, 127, 0.55);
+}
+
+.cc-grid-hscroll .cc-grid-thumb {
+	margin: 2px;
+	height: 12px;
+	width: 40%;
+	border-radius: 6px;
+	background: rgba(127, 127, 127, 0.55);
+}
+
+/* TreeView */
+.cc-treeview {
+	display: flex;
+	flex-direction: column;
+}
+
+.cc-treeview-row {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 1px 4px;
+	white-space: nowrap;
+}
+
+.cc-treeview-glyph {
+	flex: 0 0 auto;
+	width: 10px;
+	display: inline-block;
+	font-size: 9px;
+	opacity: 0.75;
+}
+
+/* TabControl */
+.cc-tabcontrol {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+
+.cc-tabstrip {
+	flex: 0 0 auto;
+	display: flex;
+	gap: 2px;
+	padding: 2px 2px 0;
+}
+
+.cc-tab {
+	padding: 2px 8px;
+	font-size: 10px;
+	border: 1px solid var(--vscode-panel-border, #888);
+	border-bottom: none;
+	border-radius: 3px 3px 0 0;
+	background: rgba(127, 127, 127, 0.12);
+}
+
+.cc-tab.active {
+	background: var(--vscode-editorWidget-background, var(--vscode-input-background));
+	font-weight: 600;
+}
+
+/* The content area of the page being designed is a real coordinate origin
+   for the controls on it, so - like a SplitContainer half - it positions its
+   own children and takes mouse events back. */
+.cc-tabcontent {
+	position: relative;
+	flex: 1 1 auto;
+	overflow: hidden;
+	pointer-events: auto;
+	border-top: 1px solid var(--vscode-panel-border, #888);
+	background: var(--vscode-editorWidget-background, transparent);
+}
+
+.cc-tab {
+	cursor: pointer;
+}
+
+/* ToolStrip */
+.cc-toolstrip {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	height: 100%;
+	padding: 0 4px;
+	background: var(--vscode-sideBar-background, rgba(127, 127, 127, 0.08));
+}
+
+.cc-tool-btn {
+	flex: 0 0 auto;
+	min-width: 18px;
+	height: 18px;
+	padding: 0 6px;
+	font-size: 10px;
+	line-height: 18px;
+	white-space: nowrap;
+	border: 1px solid var(--vscode-panel-border, #888);
+	border-radius: 2px;
+	background: rgba(127, 127, 127, 0.18);
+}
+
+/* A button with a click handler reads as live, mirroring the green the
+   Events panel uses for a wired event. */
+.cc-tool-btn.wired {
+	border-color: var(--vscode-charts-green, #3fb950);
+}
+
+.cc-tool-sep {
+	flex: 0 0 auto;
+	width: 1px;
+	height: 60%;
+	margin: 0 2px;
+	background: var(--vscode-panel-border, #888);
+}
+
+/* StatusStrip */
+.cc-statusstrip {
+	display: flex;
+	align-items: center;
+	height: 100%;
+	padding: 0 6px;
+	font-size: 10px;
+	background: var(--vscode-statusBar-background, rgba(127, 127, 127, 0.08));
+	color: var(--vscode-statusBar-foreground, var(--vscode-foreground));
+}
+
+.cc-statusstrip-panel {
+	flex: 0 0 auto;
+	padding: 0 8px;
+	border-right: 1px solid rgba(127, 127, 127, 0.3);
+	white-space: nowrap;
+}
+
+.cc-statusstrip-panel:last-child {
+	border-right: none;
+}
+
+/* Splitter */
+.cc-splitter {
+	display: flex;
+	height: 100%;
+	width: 100%;
+}
+
+.cc-splitter-horiz {
+	flex-direction: row;
+}
+
+.cc-splitter-vert {
+	flex-direction: column;
+}
+
+.cc-splitter-pane {
+	flex: 1 1 0;
+	background: rgba(127, 127, 127, 0.05);
+	border: 1px solid rgba(127, 127, 127, 0.15);
+}
+
+.cc-splitter-horiz .cc-splitter-divider {
+	flex: 0 0 4px;
+	width: 4px;
+	background: var(--vscode-panel-border, rgba(127, 127, 127, 0.4));
+}
+
+.cc-splitter-vert .cc-splitter-divider {
+	flex: 0 0 4px;
+	height: 4px;
+	background: var(--vscode-panel-border, rgba(127, 127, 127, 0.4));
+}
+
+/* ScrollBox: subtle scrollbar hint on the right edge. */
+.cc-scrollbox {
+	position: relative;
+}
+
+.cc-scrollbox-bar {
+	position: absolute;
+	top: 2px;
+	bottom: 2px;
+	right: 2px;
+	width: 6px;
+	background: rgba(127, 127, 127, 0.12);
+	border-radius: 3px;
+}
+
+.cc-scrollbox-thumb {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 40%;
+	background: var(--vscode-scrollbarSlider-background, rgba(127, 127, 127, 0.5));
+	border-radius: 3px;
+}
+
+.ctrl.selected {
+	border-color: var(--vscode-focusBorder, #0078d4);
+	box-shadow: 0 0 0 1px var(--vscode-focusBorder, #0078d4);
+	z-index: 5;
+}
+
+.ctrl.unsupported {
+	border-style: dashed;
+	background: repeating-linear-gradient(
+		45deg,
+		rgba(128,128,128,0.08),
+		rgba(128,128,128,0.08) 6px,
+		rgba(128,128,128,0.16) 6px,
+		rgba(128,128,128,0.16) 12px
+	);
+	color: var(--vscode-descriptionForeground);
+}
+
+.resize-handle {
+	position: absolute;
+	right: -4px;
+	bottom: -4px;
+	width: 10px;
+	height: 10px;
+	background: var(--vscode-focusBorder, #0078d4);
+	border-radius: 2px;
+	cursor: nwse-resize;
+	display: none;
+	z-index: 6;
+}
+
+.ctrl.selected .resize-handle {
+	display: block;
+}
+
+/* Form (window) resize handle - always visible (unlike a control's, which
+   only shows on selection) so resizing the form itself is discoverable. */
+.form-resize-handle {
+	position: absolute;
+	right: -6px;
+	bottom: -6px;
+	width: 14px;
+	height: 14px;
+	background: var(--vscode-focusBorder, #0078d4);
+	border: 2px solid var(--vscode-editor-background);
+	border-radius: 3px;
+	cursor: nwse-resize;
+	z-index: 6;
+}
+
+/* ---------- Properties panel ---------- */
+
+/* Sizing, scrolling and chrome now belong to #side-panel / .side-body; this
+   keeps only what is specific to the properties list itself. */
+
+#properties-panel h3 {
+	margin: 0 0 8px 0;
+	font-size: 13px;
+}
+
+#properties-panel .prop-empty {
+	opacity: 0.6;
+	font-size: 12px;
+	margin-top: 20px;
+	text-align: center;
+}
+
+.prop-group {
+	margin-bottom: 14px;
+}
+
+.prop-group-title {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	opacity: 0.65;
+	margin-bottom: 6px;
+	border-bottom: 1px solid var(--vscode-panel-border, #444);
+	padding-bottom: 3px;
+}
+
+.prop-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 6px;
+}
+
+.prop-row label {
+	flex: 0 0 60px;
+	font-size: 11px;
+	opacity: 0.8;
+}
+
+.prop-row input[type="text"],
+.prop-row input[type="number"],
+.prop-row textarea {
+	flex: 1 1 auto;
+	min-width: 0;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 2px;
+	padding: 3px 5px;
+	font-size: 12px;
+	font-family: var(--vscode-font-family, sans-serif);
+}
+
+/* Enum props and the parent picker both use a select; without this it keeps
+   its intrinsic width and falls out of line with every other row. */
+.prop-row select {
+	flex: 1 1 auto;
+	min-width: 0;
+	background: var(--vscode-dropdown-background, var(--vscode-input-background));
+	color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+	border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent));
+	border-radius: 2px;
+	padding: 3px 4px;
+	font-size: 12px;
+	font-family: var(--vscode-font-family, sans-serif);
+}
+
+.prop-row input[readonly] {
+	opacity: 0.7;
+}
+
+.prop-row textarea {
+	resize: vertical;
+	min-height: 50px;
+}
+
+.event-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-bottom: 6px;
+}
+
+.event-row .event-name {
+	flex: 0 0 auto;
+	font-size: 11px;
+	opacity: 0.85;
+	min-width: 90px;
+}
+
+.event-row input[type="text"] {
+	flex: 1 1 auto;
+	min-width: 0;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 2px;
+	padding: 3px 5px;
+	font-size: 12px;
+}
+
+.event-row .wire-btn {
+	flex: 0 0 auto;
+	border: none;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border-radius: 2px;
+	padding: 3px 8px;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.event-row .wire-btn:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.event-row.wired .event-name {
+	color: var(--vscode-charts-green, #3fb950);
+}
+
+/* Collection editor (ToolStrip buttons, tabs, pages, tree nodes) */
+.coll-list {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	margin-bottom: 6px;
+}
+
+.coll-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px;
+	border: 1px solid transparent;
+	border-radius: 3px;
+}
+
+.coll-row.dragging {
+	opacity: 0.45;
+}
+
+.coll-row.drop-target {
+	border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.coll-row.readonly {
+	opacity: 0.7;
+	font-size: 12px;
+	padding: 3px 5px;
+}
+
+.coll-grip {
+	flex: 0 0 auto;
+	cursor: grab;
+	opacity: 0.5;
+	font-size: 11px;
+	line-height: 1;
+}
+
+.coll-row input[type="text"] {
+	min-width: 0;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 2px;
+	padding: 3px 5px;
+	font-size: 12px;
+	font-family: var(--vscode-font-family, sans-serif);
+}
+
+.coll-row .coll-text {
+	flex: 1 1 auto;
+}
+
+/* The handler box stays narrower than the label it belongs to: the label is
+   what the user is usually reading down the list. */
+.coll-row .coll-handler {
+	flex: 0 1 40%;
+	font-size: 11px;
+	opacity: 0.85;
+}
+
+.coll-sep-label {
+	flex: 1 1 auto;
+	font-size: 11px;
+	font-style: italic;
+	opacity: 0.6;
+	border-top: 1px solid var(--vscode-panel-border, #666);
+	margin: 0 4px;
+	padding-top: 2px;
+}
+
+.coll-btn {
+	flex: 0 0 auto;
+	border: 1px solid var(--vscode-panel-border, #555);
+	background: transparent;
+	color: var(--vscode-foreground);
+	border-radius: 2px;
+	padding: 1px 5px;
+	font-size: 11px;
+	line-height: 16px;
+	cursor: pointer;
+}
+
+.coll-btn:hover {
+	background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.2));
+}
+
+.coll-actions {
+	display: flex;
+	gap: 6px;
+}
+
+.coll-add {
+	flex: 1 1 auto;
+	border: none;
+	background: var(--vscode-button-secondaryBackground, rgba(127, 127, 127, 0.2));
+	color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+	border-radius: 2px;
+	padding: 4px 8px;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.coll-add:hover {
+	background: var(--vscode-button-secondaryHoverBackground, rgba(127, 127, 127, 0.32));
+}
+
+.delete-btn {
+	width: 100%;
+	margin-top: 6px;
+	border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+	background: transparent;
+	color: var(--vscode-errorForeground, #f14c4c);
+	border-radius: 3px;
+	padding: 6px 8px;
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.delete-btn:hover {
+	background: var(--vscode-inputValidation-errorBackground, rgba(190,17,0,0.15));
+}
+
+.hint {
+	font-size: 10.5px;
+	opacity: 0.6;
+	margin-top: 2px;
+}
+
+/* ---------- Toast / error banner ---------- */
+
+#toast-stack {
+	position: fixed;
+	right: 16px;
+	bottom: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	z-index: 100;
+	max-width: 360px;
+}
+
+.toast {
+	background: var(--vscode-notifications-background, #252526);
+	color: var(--vscode-notifications-foreground, var(--vscode-foreground));
+	border: 1px solid var(--vscode-notifications-border, var(--vscode-panel-border));
+	border-left: 4px solid var(--vscode-errorForeground, #f14c4c);
+	border-radius: 3px;
+	padding: 8px 10px;
+	font-size: 12px;
+	box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	animation: toast-in 0.15s ease-out;
+}
+
+.toast.info {
+	border-left-color: var(--vscode-charts-blue, #3794ff);
+}
+
+.toast .toast-msg {
+	flex: 1 1 auto;
+	word-break: break-word;
+}
+
+.toast .toast-close {
+	flex: 0 0 auto;
+	cursor: pointer;
+	opacity: 0.7;
+	background: none;
+	border: none;
+	color: inherit;
+	font-size: 14px;
+	line-height: 1;
+}
+
+.toast .toast-close:hover {
+	opacity: 1;
+}
+
+@keyframes toast-in {
+	from { opacity: 0; transform: translateY(6px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- Parse-error / empty state ---------- */
+
+#parse-error {
+	margin: 40px auto;
+	max-width: 480px;
+	text-align: center;
+	padding: 20px;
+	border: 1px solid var(--vscode-panel-border, #444);
+	border-radius: 6px;
+	background: var(--vscode-editorWidget-background);
+}
+
+#parse-error h2 {
+	margin-top: 0;
+	font-size: 15px;
+}
+
+#parse-error pre {
+	text-align: left;
+	white-space: pre-wrap;
+	font-size: 11px;
+	background: var(--vscode-textCodeBlock-background, rgba(127,127,127,0.15));
+	padding: 8px;
+	border-radius: 4px;
+	max-height: 200px;
+	overflow: auto;
+}
+
+/* --- Controls added with the full WinForms catalogue ------------------- */
+
+/* RichTextBox: a few Markdown lines, headings a little larger. */
+.cc-richtext {
+	padding: 3px 5px;
+	overflow: hidden;
+	line-height: 1.35;
+}
+
+.cc-richtext-h1 { font-size: 15px; font-weight: 700; }
+.cc-richtext-h2 { font-size: 13px; font-weight: 700; }
+.cc-richtext-h3 { font-size: 12px; font-weight: 600; }
+
+/* CheckedListBox */
+.cc-checkedlist {
+	display: flex;
+	flex-direction: column;
+	padding: 2px 4px;
+	overflow: hidden;
+	font-size: 13px;
+}
+
+.cc-checkedlist-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 0;
+}
+
+.cc-check-box {
+	width: 12px;
+	height: 12px;
+	flex: 0 0 auto;
+	border: 1px solid var(--vscode-panel-border, #888);
+	border-radius: 2px;
+}
+
+/* MonthCalendar */
+.cc-calendar {
+	display: flex;
+	flex-direction: column;
+	padding: 2px;
+	overflow: hidden;
+	font-size: 11px;
+}
+
+.cc-calendar-head {
+	text-align: center;
+	font-weight: 600;
+	padding: 2px 0 4px;
+}
+
+.cc-calendar-grid {
+	flex: 1 1 auto;
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	gap: 1px;
+}
+
+.cc-calendar-dow {
+	text-align: center;
+	font-weight: 600;
+	opacity: 0.7;
+}
+
+.cc-calendar-day {
+	text-align: center;
+	opacity: 0.85;
+}
+
+/* DomainUpDown */
+.cc-domainupdown {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 4px;
+	font-size: 12px;
+}
+
+.cc-domain-spin {
+	display: flex;
+	flex-direction: column;
+	font-size: 8px;
+	line-height: 1;
+	opacity: 0.8;
+}
+
+/* ScrollBar */
+.cc-scrollbar {
+	background: rgba(127, 127, 127, 0.15);
+	display: flex;
+	align-items: center;
+	padding: 2px;
+}
+
+.cc-scrollbar.vertical {
+	flex-direction: column;
+	justify-content: flex-start;
+}
+
+.cc-scrollbar-thumb {
+	background: rgba(127, 127, 127, 0.6);
+	border-radius: 6px;
+	width: 35%;
+	height: 100%;
+}
+
+.cc-scrollbar.vertical .cc-scrollbar-thumb {
+	width: 100%;
+	height: 35%;
+}
+
+/* Flow/Table layout panels: guide lines only - the real children are drawn
+   as siblings on top by build(). */
+.cc-layoutpanel {
+	position: relative;
+	overflow: hidden;
+}
+
+.cc-layout-hint {
+	position: absolute;
+	left: 3px;
+	bottom: 2px;
+	font-size: 9px;
+	opacity: 0.55;
+	pointer-events: none;
+}
+
+.cc-table-grid {
+	width: 100%;
+	height: 100%;
+	display: grid;
+	gap: 0;
+}
+
+.cc-table-grid > div {
+	border-right: 1px dashed rgba(127, 127, 127, 0.35);
+	border-bottom: 1px dashed rgba(127, 127, 127, 0.35);
+}
+
+/* SplitContainer */
+.cc-splitcontainer {
+	display: flex;
+	flex-direction: row;
+	height: 100%;
+}
+
+.cc-splitcontainer.horizontal {
+	flex-direction: column;
+}
+
+/* Each half is a real coordinate origin for the controls dropped into it, so
+   it must position its absolutely-placed children itself - and take mouse
+   events, which .ctrl-content otherwise turns off for the whole rendering. */
+.cc-split-pane {
+	position: relative;
+	overflow: hidden;
+	pointer-events: auto;
+	background: rgba(127, 127, 127, 0.06);
+}
+
+/* Controls parented into a slot live inside .ctrl-content, which does not
+   take mouse events - they have to opt back in or they couldn't be selected,
+   dragged or resized. */
+.ctrl .ctrl-content .ctrl {
+	pointer-events: auto;
+}
+
+/* The container a drag would drop into, highlighted while the mouse is over
+   it so the reparent is never a surprise. */
+.drop-host {
+	outline: 2px dashed var(--vscode-focusBorder, #007fd4);
+	outline-offset: -2px;
+}
+
+.cc-split-bar {
+	flex: 0 0 auto;
+	width: 5px;
+	background: rgba(127, 127, 127, 0.35);
+}
+
+.cc-splitcontainer.horizontal .cc-split-bar {
+	width: auto;
+	height: 5px;
+}
+
+/* Flag sets (Anchor): a compact row of checkboxes rather than a text field. */
+.flag-set {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px 10px;
+}
+
+.flag-item {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+.flag-item input {
+	margin: 0;
+}
+
+/* Secondary members of a multi-selection: visible, but clearly not the one
+   the properties panel is editing. */
+.ctrl.co-selected {
+	outline: 1px dashed var(--vscode-focusBorder, #007fd4);
+	outline-offset: 1px;
+}
+
+/* Alignment guides shown while dragging, where an edge lines up with a
+   sibling's. */
+.align-guide {
+	position: absolute;
+	background: var(--vscode-charts-orange, #d18616);
+	pointer-events: none;
+	z-index: 20;
+}
+
+.align-guide.vertical {
+	top: 0;
+	bottom: 0;
+	width: 1px;
+}
+
+.align-guide.horizontal {
+	left: 0;
+	right: 0;
+	height: 1px;
+}
+
+.align-buttons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.align-btn {
+	border: 1px solid var(--vscode-button-border, transparent);
+	background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+	color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+	padding: 3px 8px;
+	border-radius: 3px;
+	cursor: pointer;
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+.align-btn:hover {
+	background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
+}
+
+/* A docked control is placed by its parent, not by its own coordinates, so
+   dragging it does nothing - mark it rather than leaving the user to wonder
+   why it snaps back. */
+.ctrl.docked {
+	outline: 1px dashed var(--vscode-charts-blue, #3794ff);
+	outline-offset: -3px;
+}

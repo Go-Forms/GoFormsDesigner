@@ -1,0 +1,18 @@
+# Build output
+node_modules/
+dist/
+*.vsix
+
+# The helper CLI is built on demand from tool/*.go (see src/goTool.ts); a
+# committed binary is both platform-specific and instantly stale. `go build`
+# run from either directory drops it in that directory, so ignore both names
+# wherever they land.
+goformsdesigner
+goformsdesigner.exe
+
+# Editors / OS
+.vscode-test/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

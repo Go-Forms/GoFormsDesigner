@@ -1,0 +1,296 @@
+[
+  {
+    "name": "no docking leaves everything alone",
+    "clientW": 400,
+    "clientH": 300,
+    "children": [
+      {
+        "name": "a",
+        "dock": "DockNone",
+        "x": 10,
+        "y": 20,
+        "w": 90,
+        "h": 30,
+        "out": [
+          10,
+          20,
+          90,
+          30
+        ]
+      },
+      {
+        "name": "b",
+        "dock": "DockNone",
+        "x": 200,
+        "y": 100,
+        "w": 120,
+        "h": 40,
+        "out": [
+          200,
+          100,
+          120,
+          40
+        ]
+      }
+    ]
+  },
+  {
+    "name": "dock left takes the full height",
+    "clientW": 523,
+    "clientH": 200,
+    "children": [
+      {
+        "name": "tabs",
+        "dock": "DockLeft",
+        "x": 11,
+        "y": 7,
+        "w": 500,
+        "h": 190,
+        "out": [
+          0,
+          0,
+          500,
+          200
+        ]
+      }
+    ]
+  },
+  {
+    "name": "dock top then bottom then fill",
+    "clientW": 600,
+    "clientH": 400,
+    "children": [
+      {
+        "name": "toolbar",
+        "dock": "DockTop",
+        "x": 0,
+        "y": 0,
+        "w": 100,
+        "h": 34,
+        "out": [
+          0,
+          0,
+          600,
+          34
+        ]
+      },
+      {
+        "name": "status",
+        "dock": "DockBottom",
+        "x": 0,
+        "y": 0,
+        "w": 100,
+        "h": 24,
+        "out": [
+          0,
+          376,
+          600,
+          24
+        ]
+      },
+      {
+        "name": "body",
+        "dock": "DockFill",
+        "x": 5,
+        "y": 5,
+        "w": 10,
+        "h": 10,
+        "out": [
+          0,
+          34,
+          600,
+          342
+        ]
+      }
+    ]
+  },
+  {
+    "name": "left and right carve the sides before fill",
+    "clientW": 600,
+    "clientH": 400,
+    "children": [
+      {
+        "name": "nav",
+        "dock": "DockLeft",
+        "x": 0,
+        "y": 0,
+        "w": 150,
+        "h": 999,
+        "out": [
+          0,
+          0,
+          150,
+          400
+        ]
+      },
+      {
+        "name": "aside",
+        "dock": "DockRight",
+        "x": 0,
+        "y": 0,
+        "w": 100,
+        "h": 999,
+        "out": [
+          500,
+          0,
+          100,
+          400
+        ]
+      },
+      {
+        "name": "body",
+        "dock": "DockFill",
+        "x": 0,
+        "y": 0,
+        "w": 10,
+        "h": 10,
+        "out": [
+          150,
+          0,
+          350,
+          400
+        ]
+      }
+    ]
+  },
+  {
+    "name": "docking order decides who gets the corner",
+    "clientW": 500,
+    "clientH": 300,
+    "children": [
+      {
+        "name": "side",
+        "dock": "DockLeft",
+        "x": 0,
+        "y": 0,
+        "w": 120,
+        "h": 0,
+        "out": [
+          0,
+          0,
+          120,
+          300
+        ]
+      },
+      {
+        "name": "head",
+        "dock": "DockTop",
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 40,
+        "out": [
+          120,
+          0,
+          380,
+          40
+        ]
+      }
+    ]
+  },
+  {
+    "name": "only the first fill wins",
+    "clientW": 400,
+    "clientH": 200,
+    "children": [
+      {
+        "name": "first",
+        "dock": "DockFill",
+        "x": 0,
+        "y": 0,
+        "w": 10,
+        "h": 10,
+        "out": [
+          0,
+          0,
+          400,
+          200
+        ]
+      },
+      {
+        "name": "second",
+        "dock": "DockFill",
+        "x": 3,
+        "y": 4,
+        "w": 20,
+        "h": 20,
+        "out": [
+          3,
+          4,
+          20,
+          20
+        ]
+      }
+    ]
+  },
+  {
+    "name": "docked and floating siblings together",
+    "clientW": 400,
+    "clientH": 300,
+    "children": [
+      {
+        "name": "top",
+        "dock": "DockTop",
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 50,
+        "out": [
+          0,
+          0,
+          400,
+          50
+        ]
+      },
+      {
+        "name": "loose",
+        "dock": "DockNone",
+        "x": 20,
+        "y": 20,
+        "w": 80,
+        "h": 25,
+        "out": [
+          20,
+          20,
+          80,
+          25
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a dock bigger than the client clamps to nothing left",
+    "clientW": 200,
+    "clientH": 100,
+    "children": [
+      {
+        "name": "huge",
+        "dock": "DockLeft",
+        "x": 0,
+        "y": 0,
+        "w": 300,
+        "h": 0,
+        "out": [
+          0,
+          0,
+          300,
+          100
+        ]
+      },
+      {
+        "name": "body",
+        "dock": "DockFill",
+        "x": 0,
+        "y": 0,
+        "w": 10,
+        "h": 10,
+        "out": [
+          300,
+          0,
+          0,
+          100
+        ]
+      }
+    ]
+  }
+]

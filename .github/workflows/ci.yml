@@ -1,0 +1,107 @@
+# The extension is two halves that have to be checked separately: the
+# TypeScript host (src/, tested through test/*.test.js against the DOM shim)
+# and the Go helper CLI it shells out to (tool/), which is where all the
+# parsing and rewriting of designer files actually happens.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  extension:
+    name: Extension (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Bundle
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+  tool:
+    name: Helper CLI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tool/go.mod
+          cache-dependency-path: tool/go.mod
+
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        working-directory: tool
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would rewrite:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        working-directory: tool
+        run: go vet ./...
+
+      - name: Test
+        working-directory: tool
+        run: go test ./...
+
+  package:
+    name: Package VSIX
+    runs-on: ubuntu-latest
+    needs: [extension, tool]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the .vsix
+        run: npx vsce package --out goforms-designer.vsix
+
+      # Every green build leaves an installable extension attached to it, so a
+      # change can be tried in a real editor without waiting for a release.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: goforms-designer-vsix
+          path: goforms-designer.vsix
+          retention-days: 30

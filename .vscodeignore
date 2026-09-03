@@ -1,0 +1,34 @@
+.git/**
+.gitignore
+.vscode/**
+.vscode-test/**
+out/**
+src/**
+*.ts
+!dist/**
+tsconfig.json
+node_modules/**
+!node_modules/**/LICENSE*
+**/*.map
+**/.eslintrc*
+**/tsconfig.json
+*.vsix
+
+# tool/, templates/ and media/ are required at runtime and no rule above
+# excludes them, so they need no negation to be kept - and must not have one:
+# vsce applies every `!` rule *after* the exclusions, so a blanket `!tool/**`
+# silently re-included the test files and the built binary below.
+!templates/**
+!media/**
+
+# Never ship a prebuilt tool binary - it's built fresh on first activation
+# (go build), and a committed one is both platform-specific and stale.
+tool/*.exe
+tool/goformsdesigner
+tool/goformsdesigner.exe
+
+# Tests aren't needed at runtime and only slow the first-activation build.
+tool/*_test.go
+
+# The designer/runtime parity test and its fixture are development-only.
+test/**

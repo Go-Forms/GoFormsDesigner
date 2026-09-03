@@ -1,0 +1,256 @@
+{
+  "padding": 4,
+  "textSize": 14,
+  "scrollBar": 16,
+  "cases": [
+    {
+      "name": "fixed columns, both scrollbars",
+      "cols": [
+        "Order",
+        "Customer",
+        "Total"
+      ],
+      "rows": [
+        [
+          "1001",
+          "Acme Corp",
+          "$1,240.00"
+        ]
+      ],
+      "width": 520,
+      "columnsMode": "SizeFixed",
+      "rowsMode": "SizeFixed",
+      "rowHeight": 28,
+      "scrollBars": "ScrollBarsBoth",
+      "widths": [
+        100,
+        100,
+        100
+      ],
+      "rowHeights": [
+        28
+      ],
+      "measured": [
+        [
+          40.734375,
+          68.21875,
+          34.609375
+        ],
+        [
+          32.0625,
+          72,
+          63.609375
+        ]
+      ]
+    },
+    {
+      "name": "fill columns, vertical scroll only",
+      "cols": [
+        "Order",
+        "Customer",
+        "Total"
+      ],
+      "rows": [
+        [
+          "1001",
+          "Acme Corp",
+          "$1,240.00"
+        ]
+      ],
+      "width": 520,
+      "columnsMode": "SizeFill",
+      "rowsMode": "SizeFixed",
+      "rowHeight": 28,
+      "scrollBars": "ScrollBarsVertical",
+      "widths": [
+        168,
+        168,
+        168
+      ],
+      "rowHeights": [
+        28
+      ],
+      "measured": [
+        [
+          40.734375,
+          68.21875,
+          34.609375
+        ],
+        [
+          32.0625,
+          72,
+          63.609375
+        ]
+      ]
+    },
+    {
+      "name": "fill columns, no scrollbars",
+      "cols": [
+        "A",
+        "B"
+      ],
+      "rows": [
+        [
+          "x",
+          "y"
+        ]
+      ],
+      "width": 300,
+      "columnsMode": "SizeFill",
+      "rowsMode": "SizeFixed",
+      "rowHeight": 30,
+      "scrollBars": "ScrollBarsNone",
+      "widths": [
+        150,
+        150
+      ],
+      "rowHeights": [
+        30
+      ],
+      "measured": [
+        [
+          9.65625,
+          9.40625
+        ],
+        [
+          7.40625,
+          7.140625
+        ]
+      ]
+    },
+    {
+      "name": "size to content",
+      "cols": [
+        "Short",
+        "A much longer column title"
+      ],
+      "rows": [
+        [
+          "tiny",
+          "and an even longer cell value than the header"
+        ]
+      ],
+      "width": 900,
+      "columnsMode": "SizeToContent",
+      "rowsMode": "SizeFixed",
+      "rowHeight": 30,
+      "scrollBars": "ScrollBarsBoth",
+      "widths": [
+        54.03125,
+        316.51562
+      ],
+      "rowHeights": [
+        30
+      ],
+      "measured": [
+        [
+          38.03125,
+          190.484375
+        ],
+        [
+          24.453125,
+          300.515625
+        ]
+      ]
+    },
+    {
+      "name": "fixed columns squeezed to fit",
+      "cols": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F"
+      ],
+      "rows": [
+        [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6"
+        ]
+      ],
+      "width": 300,
+      "columnsMode": "SizeFixed",
+      "rowsMode": "SizeFixed",
+      "rowHeight": 30,
+      "scrollBars": "ScrollBarsNone",
+      "widths": [
+        50,
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "rowHeights": [
+        30
+      ],
+      "measured": [
+        [
+          9.65625,
+          9.40625,
+          8.921875,
+          10.359375,
+          7.84375,
+          7.6875
+        ],
+        [
+          8.015625,
+          8.015625,
+          8.015625,
+          8.015625,
+          8.015625,
+          8.015625
+        ]
+      ]
+    },
+    {
+      "name": "auto row heights with multi-line cells",
+      "cols": [
+        "A",
+        "B"
+      ],
+      "rows": [
+        [
+          "one",
+          "two"
+        ],
+        [
+          "three\nlines\nhere",
+          "x"
+        ]
+      ],
+      "width": 400,
+      "columnsMode": "SizeFixed",
+      "rowsMode": "SizeToContent",
+      "rowHeight": 24,
+      "scrollBars": "ScrollBarsBoth",
+      "widths": [
+        100,
+        100
+      ],
+      "rowHeights": [
+        35.078125,
+        89.234375
+      ],
+      "measured": [
+        [
+          9.65625,
+          9.40625
+        ],
+        [
+          25.015625,
+          24.515625
+        ],
+        [
+          129.046875,
+          7.40625
+        ]
+      ]
+    }
+  ]
+}
