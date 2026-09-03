@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.2
+
+Marketplace metadata. The manifest carried none of what a gallery page is
+built from, so the listing would have been an unnamed tile with no icon, no
+source link and nothing to find it by:
+
+- an icon (`media/icon.png`),
+- `repository`, `homepage`, `bugs` and `qna` links,
+- `license`, `keywords` and a gallery banner.
+
+The release workflow now checks the token against the publisher before it
+tries to publish. A missing publisher and an expired token failed at
+different points with errors that named neither; both now produce one message
+saying which it is. The GitHub release is created last, so a failed publish
+cannot leave a release advertising a version that never shipped.
+
 ## 0.7.1
 
 ### Finding Go on Linux and macOS

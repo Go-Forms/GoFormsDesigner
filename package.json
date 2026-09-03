@@ -2,8 +2,34 @@
   "name": "goforms-designer",
   "displayName": "GoForms Designer",
   "description": "Visual WinForms-style designer for GoForms: drag-and-drop editing of *-designer.go files, plus project/form scaffolding commands.",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "publisher": "goforms",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "homepage": "https://go-forms.github.io/GoForms/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Go-Forms/GoFormsDesigner.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Go-Forms/GoFormsDesigner/issues"
+  },
+  "qna": "https://github.com/Go-Forms/GoFormsDesigner/issues",
+  "galleryBanner": {
+    "color": "#0f172a",
+    "theme": "dark"
+  },
+  "keywords": [
+    "go",
+    "golang",
+    "winforms",
+    "gui",
+    "designer",
+    "form designer",
+    "drag and drop",
+    "fyne",
+    "desktop"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },

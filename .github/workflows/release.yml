@@ -73,8 +73,19 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           if [ -z "$VSCE_PAT" ]; then
-            echo "VSCE_PAT is not set - skipping the VS Code Marketplace."
+            echo "::notice::VSCE_PAT is not set - skipping the VS Code Marketplace."
             exit 0
+          fi
+          # Publishing needs two things, and they fail at different moments
+          # with errors that do not say which is wrong. Checking the token
+          # against the publisher first turns both into one clear message.
+          publisher=$(node -p "require('./package.json').publisher")
+          if ! npx vsce verify-pat "$publisher"; then
+            echo "::error::VSCE_PAT is not valid for the '$publisher' publisher."
+            echo "Either the token has expired or lacks Marketplace: Manage, or the"
+            echo "publisher does not exist yet - create it once at"
+            echo "https://marketplace.visualstudio.com/manage, then re-run this job."
+            exit 1
           fi
           npx vsce publish --packagePath "goforms-designer-${{ env.VERSION }}.vsix"
 
@@ -84,11 +95,12 @@ jobs:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
           if [ -z "$OVSX_PAT" ]; then
-            echo "OVSX_PAT is not set - skipping Open VSX."
+            echo "::notice::OVSX_PAT is not set - skipping Open VSX."
             exit 0
           fi
           npx ovsx publish "goforms-designer-${{ env.VERSION }}.vsix" -p "$OVSX_PAT"
 
+      # Last, so a release never advertises a version that failed to publish.
       - name: Attach the .vsix to a GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
