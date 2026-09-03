@@ -83,39 +83,30 @@ func tidyFile(path string) (*TidyResult, error) {
 }
 
 // appendStmtEdits drops every statement in initializeComponent that a later
-// statement already overrides, or that simply repeats an earlier one.
+// statement already overrides.
 //
-// The unit of redundancy is a key: two statements sharing one describe the
-// same single fact about the form, so only one of them can be observable.
-// Which one survives depends on the key - see stmtKey.
+// The unit of redundancy is a key: two statements sharing one state the same
+// single fact about the form, so only the last of them is observable.
 func appendStmtEdits(r *parseResult, res *TidyResult, edits []edit) []edit {
 	if r.initBody == nil {
 		return edits
 	}
 
-	type occurrence struct {
-		stmt ast.Stmt
-		keep bool
-	}
-	seen := map[string]*occurrence{}
+	seen := map[string]ast.Stmt{}
 	var doomed []ast.Stmt
 
 	for _, stmt := range r.initBody.List {
-		key, keepLast, modelled := stmtKey(r, stmt)
-		if !modelled {
+		key, ok := stmtKey(r, stmt)
+		if !ok {
 			continue
 		}
-		prev, dup := seen[key]
-		if !dup {
-			seen[key] = &occurrence{stmt: stmt}
-			continue
+		// The last statement to state a fact is the one that decides it, at
+		// runtime and in the model parse.go builds - so it is the one kept,
+		// and the earlier ones are dead code by the time they are reached.
+		if prev, dup := seen[key]; dup {
+			doomed = append(doomed, prev)
 		}
-		if keepLast {
-			doomed = append(doomed, prev.stmt) // the later statement wins
-			seen[key] = &occurrence{stmt: stmt}
-		} else {
-			doomed = append(doomed, stmt) // the first occurrence wins
-		}
+		seen[key] = stmt
 	}
 
 	for _, stmt := range doomed {
@@ -144,21 +135,17 @@ func deleteLine(edits []edit, r *parseResult, pos, end token.Pos, res *TidyResul
 	return edits, true
 }
 
-// stmtKey names the single fact a statement states, when it states one.
-//
-// keepLast distinguishes the two shapes of redundancy. A setter, an event
-// wiring and an AddControl each assert a value that the last call decides, so
-// the earlier calls are dead and the *last* one survives. Anything else that
-// matches here is a verbatim repeat, where the copies are interchangeable and
-// the *first* one survives, holding its original position in the file.
-func stmtKey(r *parseResult, stmt ast.Stmt) (key string, keepLast, ok bool) {
+// stmtKey names the single fact a statement states, when it states one at
+// all. Two statements sharing a key are two answers to one question, and the
+// file can only be acting on the last of them.
+func stmtKey(r *parseResult, stmt ast.Stmt) (key string, ok bool) {
 	expr, isExpr := stmt.(*ast.ExprStmt)
 	if !isExpr {
-		return "", false, false
+		return "", false
 	}
 	call, isCall := expr.X.(*ast.CallExpr)
 	if !isCall {
-		return "", false, false
+		return "", false
 	}
 	recv := r.model.RecvVar
 
@@ -170,14 +157,14 @@ func stmtKey(r *parseResult, stmt ast.Stmt) (key string, keepLast, ok bool) {
 	if sel, isSel := call.Fun.(*ast.SelectorExpr); isSel && sel.Sel.Name == "AddControl" && len(call.Args) == 1 {
 		if argParts, isChain := selChain(call.Args[0]); isChain && len(argParts) == 2 && argParts[0] == recv {
 			if _, known := r.controls[argParts[1]]; known {
-				return "add:" + argParts[1], true, true
+				return "add:" + argParts[1], true
 			}
 		}
 	}
 
 	parts, isChain := selChain(call.Fun)
 	if !isChain || len(parts) < 2 || parts[0] != recv {
-		return "", false, false
+		return "", false
 	}
 
 	switch {
@@ -188,10 +175,10 @@ func stmtKey(r *parseResult, stmt ast.Stmt) (key string, keepLast, ok bool) {
 	// the file is brought in line with what the designer shows.
 	case len(parts) == 4 && parts[3] == "Handle":
 		if _, known := r.controls[parts[1]]; known {
-			return "event:" + parts[1] + "." + parts[2], true, true
+			return "event:" + parts[1] + "." + parts[2], true
 		}
 	case len(parts) == 3 && parts[2] == "Handle":
-		return "event:" + recv + "." + parts[1], true, true
+		return "event:" + recv + "." + parts[1], true
 
 	// mf.field.SetXxx(v) for a setter the catalog models: one value, last
 	// call wins. Deliberately not "any method starting with Set" - an indexed
@@ -199,17 +186,14 @@ func stmtKey(r *parseResult, stmt ast.Stmt) (key string, keepLast, ok bool) {
 	// call, and collapsing those would destroy a table's layout.
 	case len(parts) == 3:
 		if pc, known := r.controls[parts[1]]; known && modelledSetter(pc.spec.Type, parts[2]) {
-			return "set:" + parts[1] + "." + parts[2], true, true
+			return "set:" + parts[1] + "." + parts[2], true
 		}
 	}
 
-	// Not a fact the model owns. Still worth collapsing verbatim repeats -
-	// except of the calls that build a list, where two identical lines mean
-	// two identical items, not one written twice.
-	if cumulative(parts[len(parts)-1]) {
-		return "", false, false
-	}
-	return "text:" + string(r.src[offset(r.fset, stmt.Pos()):offset(r.fset, stmt.End())]), false, true
+	// Anything else states nothing the model owns, and tidy has no way to
+	// know whether repeating it means something. `RemoveAt(0)` twice removes
+	// two items; `AddTab("Page")` twice makes two pages. Left alone.
+	return "", false
 }
 
 // alwaysModelled are the setters every control understands regardless of
@@ -233,13 +217,6 @@ func modelledSetter(controlType, method string) bool {
 	}
 	_, ok = desc.Setters[method]
 	return ok
-}
-
-// cumulative reports whether a method appends to a list, so repeating it is
-// meaningful: `AddTab("Page")` twice is two pages with the same title, not a
-// line written twice.
-func cumulative(method string) bool {
-	return strings.HasPrefix(method, "Add") && method != "AddControl"
 }
 
 // appendFieldEdits drops repeated declarations of one struct field, keeping
