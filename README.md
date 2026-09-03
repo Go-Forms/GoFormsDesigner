@@ -158,17 +158,49 @@ changes after a reload (`Ctrl+R` / `Cmd+R` in the dev host window).
   automatically near where you're creating the project, or ask you to
   point at it once via `GoForms: Set Framework Path...`.
 
+## Releasing
+
+Publishing is driven by the version in `package.json`; the tag only has to
+agree with it, and `.github/workflows/release.yml` fails the run if it does
+not — a mismatch is the one mistake a marketplace accepts and then serves
+forever.
+
+    # bump "version" in package.json, update CHANGELOG.md, commit, then:
+    git tag v0.7.0
+    git push origin v0.7.0
+
+That runs the full check suite, builds the `.vsix`, publishes it to the VS
+Code Marketplace and to Open VSX, and cuts a GitHub release with the `.vsix`
+attached. Editors that pull from either marketplace then offer the update on
+their own.
+
+Two optional repository secrets decide how far it goes. `VSCE_PAT` is an
+Azure DevOps token with *Marketplace: Manage* for the `goforms` publisher;
+`OVSX_PAT` is an Open VSX access token, which is what reaches VSCodium,
+Cursor, Gitpod and code-server. A publishing step whose token is missing is
+skipped rather than failed, so a fork with neither still gets a release with
+an installable `.vsix` on it.
+
+`workflow_dispatch` runs the same job with `dry_run` on: everything is built
+and verified, nothing is published.
+
 ## Repo layout
 
 ```
 src/
-  extension.ts               <- activation entry point, command registration
-  scaffold.ts                <- template copying / token substitution / validation
-  goTool.ts                  <- typed wrapper around the bundled Go CLI
-  designerEditorProvider.ts  <- visual designer webview (owned separately)
-media/                       <- designer webview assets (owned separately)
+  extension.ts               <- activation, and the commands that act on files
+  scaffold.ts                <- template copying, token substitution, validation
+  goTool.ts                  <- the only caller of the bundled Go CLI
+  designerEditorProvider.ts  <- the designer's custom editor and its webview host
+media/                       <- webview assets: the canvas, its layout ports
 templates/
-  empty/                     <- minimal project template (go.mod, main.go, MainForm)
-  example/                   <- full demo project template (adapted from GoFormsDemo)
-tool/                        <- bundled Go CLI source (parse/apply/ensure-handler/catalog)
+  empty/                     <- minimal project (go.mod, main.go, MainForm)
+  example/                   <- a fuller project, adapted from GoFormsDemo
+test/                        <- the extension's tests
+testlib/                     <- the DOM shim they run media/*.js against
+tool/                        <- the Go CLI: every read and write of Go source
 ```
+
+The split that matters is `src/` against `tool/`: nothing in `src/` parses or
+writes Go. It builds `tool/` on first activation, caches the binary, and
+exchanges JSON with it (see `tool/README-tool.md`).
