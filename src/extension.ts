@@ -20,7 +20,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('goforms.createProject', () => createProject(context)),
 		vscode.commands.registerCommand('goforms.newForm', (folderUri?: vscode.Uri) => newForm(folderUri)),
 		vscode.commands.registerCommand('goforms.setFrameworkPath', () => setFrameworkPath()),
-		vscode.commands.registerCommand('goforms.tidyDesignerFile', (uri?: vscode.Uri) => tidyDesignerFile(context, uri))
+		vscode.commands.registerCommand('goforms.tidyDesignerFile', (uri?: vscode.Uri) => tidyDesignerFile(context, uri)),
+		vscode.commands.registerCommand('goforms.checkSetup', () => checkSetup(context))
 	);
 
 	registerDesignerEditorIfAvailable(context);
@@ -290,4 +291,52 @@ function activeDesignerUri(): vscode.Uri | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// goforms.checkSetup
+// ---------------------------------------------------------------------------
+
+/** Reports whether the extension can actually do its job here: which `go` it
+ * found, whether the helper CLI builds and answers, and where the framework
+ * checkout is.
+ *
+ * Without this, a Go the editor cannot see looks the same as no Go at all,
+ * and the only symptom is the designer failing to open a file. */
+async function checkSetup(context: vscode.ExtensionContext): Promise<void> {
+	const { GoFormsTool, findGo } = require('./goTool');
+	const lines: string[] = [`Platform: ${process.platform} ${process.arch}`];
+
+	let goFound = false;
+	try {
+		const { go, searched } = findGo();
+		lines.push(`Go: ${go}`);
+		lines.push(`  searched: ${searched.join(', ')}`);
+		goFound = true;
+	} catch (err) {
+		lines.push(`Go: NOT FOUND`);
+		lines.push(`  ${err instanceof Error ? err.message.replace(/\n+/g, ' ') : String(err)}`);
+	}
+
+	if (goFound) {
+		try {
+			const tool = new GoFormsTool(context);
+			const binary = await tool.ensureBinary();
+			const catalog = await tool.catalog();
+			lines.push(`Helper CLI: ${binary}`);
+			lines.push(`  built and answering - ${Object.keys(catalog).length} control types`);
+		} catch (err) {
+			lines.push(`Helper CLI: FAILED`);
+			lines.push(`  ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+
+	const framework = vscode.workspace.getConfiguration('goforms').get<string>('frameworkPath');
+	lines.push(`Framework path: ${framework?.trim() || '(not set - will be asked for, or auto-detected)'}`);
+
+	const channel = vscode.window.createOutputChannel('GoForms');
+	context.subscriptions.push(channel);
+    channel.clear();
+	channel.appendLine(lines.join('\n'));
+	channel.show(true);
 }

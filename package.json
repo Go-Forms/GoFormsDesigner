@@ -2,7 +2,7 @@
   "name": "goforms-designer",
   "displayName": "GoForms Designer",
   "description": "Visual WinForms-style designer for GoForms: drag-and-drop editing of *-designer.go files, plus project/form scaffolding commands.",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "publisher": "goforms",
   "engines": {
     "vscode": "^1.85.0"
@@ -62,6 +62,11 @@
         "title": "GoForms: Tidy Designer File",
         "category": "GoForms",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "goforms.checkSetup",
+        "title": "GoForms: Check Setup",
+        "category": "GoForms"
       }
     ],
     "menus": {
@@ -91,6 +96,9 @@
           "command": "goforms.setFrameworkPath"
         },
         {
+          "command": "goforms.checkSetup"
+        },
+        {
           "command": "goforms.tidyDesignerFile",
           "when": "resourceFilename =~ /-designer\\.go$/"
         }
@@ -116,6 +124,11 @@
     "configuration": {
       "title": "GoForms Designer",
       "properties": {
+        "goforms.goPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Full path to the `go` executable, for when the editor cannot find one itself. A GUI editor inherits the desktop session's `PATH`, not the one your `.bashrc`/`.zshrc` builds, so a Go installed under `/usr/local/go/bin` or managed by asdf/mise is often invisible to it even though it works in your terminal. Leave empty to search `goforms.goPath`, `go.goroot`, `GOROOT`, `PATH`, and the usual install locations, in that order."
+        },
         "goforms.frameworkPath": {
           "type": "string",
           "default": "",

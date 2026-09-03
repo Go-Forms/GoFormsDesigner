@@ -107,16 +107,21 @@ that reports it.
 ### Option A: build a `.vsix` and install it (closest to "real" install)
 
 ```
-npm install
-npm run build
-npm run package        # or: npx vsce package
-code --install-extension goforms-designer-0.1.0.vsix
+npm ci
+npm run package        # runs the bundle, then vsce package
+code --install-extension goforms-designer-<version>.vsix
 ```
 
-`npm run package` runs `vsce package`, which produces
-`goforms-designer-0.1.0.vsix` in the repo root. `code --install-extension`
-installs it into your local VS Code the same way installing from the
-Marketplace would. Reload the window afterwards if VS Code was already open.
+`npm ci` rather than `npm install`: esbuild ships a native binary per
+platform, so a `node_modules` copied between Windows and Linux (or checked
+out on one and used on the other) fails the bundle step with a platform
+mismatch. `npm ci` installs from the lockfile for the machine it runs on.
+
+`npm run package` produces the `.vsix` in the repo root, and
+`code --install-extension` installs it exactly as installing from the
+Marketplace would. Reload the window afterwards if the editor was already
+open. Every green CI build also attaches a ready-made `.vsix`, and every
+release publishes one - see [Releasing](#releasing).
 
 To update after making changes, bump the `version` in `package.json`,
 re-run the three commands above, and reinstall (or use
@@ -129,7 +134,7 @@ the install silently doesn't apply there and the custom editor/commands
 never activate with no visible error. Install into that profile explicitly:
 
 ```
-code --profile "Your Profile Name" --install-extension goforms-designer-0.1.0.vsix
+code --profile "Your Profile Name" --install-extension goforms-designer-<version>.vsix
 ```
 
 (find the exact name in the profile switcher, or in the window title bar).
@@ -137,7 +142,7 @@ code --profile "Your Profile Name" --install-extension goforms-designer-0.1.0.vs
 ### Option B: run from source in an Extension Development Host (fastest for development)
 
 ```
-npm install
+npm ci
 npm run build
 ```
 
@@ -149,14 +154,40 @@ changes after a reload (`Ctrl+R` / `Cmd+R` in the dev host window).
 
 ## Requirements
 
-- VS Code 1.85+.
-- Go on `PATH` (only needed the first time the visual designer runs -
-  builds `tool/*.go` into a small helper binary, cached in the extension's
-  global storage).
+- VS Code 1.85+. Windows, Linux and macOS are all supported; nothing in the
+  extension is platform-specific, and CI builds and tests it on all three.
+- A Go toolchain. It is needed only the first time the designer runs, to
+  build `tool/*.go` into a helper binary cached in the extension's global
+  storage.
 - A local GoForms checkout somewhere on disk (for the `replace goforms => ...`
   directive new projects need). `Create New Project` will try to find one
   automatically near where you're creating the project, or ask you to
   point at it once via `GoForms: Set Framework Path...`.
+
+### If it cannot find Go (usually Linux or macOS)
+
+A GUI editor does not run a login shell, so it inherits the desktop session's
+`PATH` — not the one your `.bashrc` or `.zshrc` builds. The official Go
+tarball tells you to add `/usr/local/go/bin` in exactly those files, and
+asdf, mise and gvm all work the same way, so `go` working in your terminal
+says nothing about whether the editor can see it.
+
+The extension looks in `goforms.goPath`, then `go.goroot`, then `GOROOT`,
+then `PATH`, then the usual install locations (`/usr/local/go/bin`,
+`/usr/lib/go/bin`, `/opt/homebrew/bin`, `/snap/bin`, `~/go/bin`, the asdf and
+mise shim directories, and the Windows equivalents), verifying each by
+running `go version` rather than trusting the file to exist.
+
+If yours is somewhere else, point at it once:
+
+```jsonc
+// settings.json
+"goforms.goPath": "/usr/local/go/bin/go"
+```
+
+Run **`GoForms: Check Setup`** to see which `go` was found, everywhere that
+was searched, whether the helper CLI builds and answers, and where the
+framework checkout is.
 
 ## Releasing
 

@@ -1,0 +1,13 @@
+# The helper CLI splices bytes into *-designer.go and writes LF, and gofmt
+# normalises the whole file to LF whenever it rewrites one. A checkout with
+# CRLF would turn every designer edit into a mixed-ending file and a
+# whole-file diff, so the working tree is LF on every platform.
+* text=auto eol=lf
+
+# Fixtures the tests compare byte for byte.
+test/*.json -text
+
+*.png binary
+*.ico binary
+*.vsix binary
+*.exe binary

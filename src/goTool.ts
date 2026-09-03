@@ -5,6 +5,7 @@
 // contract the rest of the extension is built against.
 import * as cp from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -155,11 +156,121 @@ export interface ControlDesc {
 	Collection?: CollectionDesc;
 }
 
-/** Thrown when a `go` toolchain can't be found on PATH; callers should show
- * a friendly, actionable error message rather than a raw stack trace. */
+/** Thrown when no `go` executable could be found. The message names every
+ * place that was looked, because on Linux and macOS the usual cause is not a
+ * missing toolchain but an invisible one - see findGo. */
 export class GoNotFoundError extends Error {
-	constructor() {
-		super('The Go toolchain ("go") was not found on PATH. GoForms Designer needs it once to build its helper tool.');
+	constructor(searched: string[]) {
+		super(
+			'GoForms Designer needs the Go toolchain once, to build its helper tool, and could not find it.\n\n' +
+			'Looked in: ' + searched.join(', ') + '.\n\n' +
+			'If Go is installed somewhere else, set "goforms.goPath" to the full path of the go executable ' +
+			'(for example /usr/local/go/bin/go), or launch the editor from a shell that has go on its PATH.'
+		);
+	}
+}
+
+/** Directories worth checking for a Go install, per platform.
+ *
+ * A GUI editor does not run a login shell, so on Linux and macOS it inherits
+ * the desktop session's PATH - not the one `.bashrc` or `.zshrc` builds. The
+ * official Go tarball tells you to add /usr/local/go/bin in exactly those
+ * files, and every version manager works the same way, so "go works in my
+ * terminal but the extension cannot find it" is the normal first experience
+ * rather than an unusual one. These are the places it actually lives. */
+function goCandidateDirs(): string[] {
+	const home = os.homedir();
+	if (process.platform === 'win32') {
+		return [
+			'C:\\Program Files\\Go\\bin',
+			'C:\\Go\\bin',
+			path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Go', 'bin'),
+			path.join(home, 'go', 'bin'),
+		];
+	}
+	return [
+		'/usr/local/go/bin',          // the official tarball's own instructions
+		'/usr/lib/go/bin',            // distribution packages
+		'/usr/local/bin',
+		'/opt/homebrew/bin',          // Homebrew on Apple silicon
+		'/opt/go/bin',
+		'/snap/bin',                  // Ubuntu's snap
+		path.join(home, 'go', 'bin'),
+		path.join(home, '.local', 'bin'),
+		path.join(home, '.asdf', 'shims'),
+		path.join(home, '.local', 'share', 'mise', 'shims'),
+	];
+}
+
+/** Locates a usable `go`, and reports everywhere it looked if it fails.
+ *
+ * The order is deliberate: an explicit setting wins over everything, then the
+ * Go extension's own GOROOT (if the user has that installed, it is already
+ * correct), then the environment, then PATH, and only then the guesses. */
+export function findGo(): { go: string; searched: string[] } {
+	const exe = process.platform === 'win32' ? 'go.exe' : 'go';
+	const searched: string[] = [];
+
+	const configured = vscode.workspace.getConfiguration('goforms').get<string>('goPath')?.trim();
+	if (configured) {
+		searched.push(`the goforms.goPath setting (${configured})`);
+		if (isExecutable(configured)) {
+			return { go: configured, searched };
+		}
+	}
+
+	// golang.go stores the toolchain it manages here, and a user who has that
+	// extension has a working Go however it was installed.
+	const goroots = [
+		vscode.workspace.getConfiguration('go').get<string>('goroot')?.trim(),
+		process.env.GOROOT,
+	];
+	for (const root of goroots) {
+		if (!root) {
+			continue;
+		}
+		const candidate = path.join(root, 'bin', exe);
+		searched.push(candidate);
+		if (isExecutable(candidate)) {
+			return { go: candidate, searched };
+		}
+	}
+
+	searched.push('PATH');
+	if (canRun(exe)) {
+		return { go: exe, searched };
+	}
+
+	for (const dir of goCandidateDirs()) {
+		if (!dir) {
+			continue;
+		}
+		const candidate = path.join(dir, exe);
+		searched.push(candidate);
+		if (isExecutable(candidate)) {
+			return { go: candidate, searched };
+		}
+	}
+
+	throw new GoNotFoundError(searched);
+}
+
+function isExecutable(p: string): boolean {
+	try {
+		return fs.statSync(p).isFile() && canRun(p);
+	} catch {
+		return false;
+	}
+}
+
+/** Runs `<go> version` to prove the file is a working toolchain rather than
+ * a broken symlink or a version-manager shim with nothing behind it. */
+function canRun(goPath: string): boolean {
+	try {
+		cp.execFileSync(goPath, ['version'], { stdio: 'ignore', timeout: 15000 });
+		return true;
+	} catch {
+		return false;
 	}
 }
 
@@ -191,15 +302,35 @@ export class GoFormsTool {
 	}
 
 	private build(toolSrcDir: string, dest: string): Promise<void> {
+		const { go } = findGo();
 		return new Promise((resolve, reject) => {
-			cp.execFile('go', ['build', '-o', dest, '.'], { cwd: toolSrcDir }, (err, _stdout, stderr) => {
+			// GOFLAGS and GO111MODULE from the user's environment can turn this
+			// into a vendored or GOPATH-mode build of a module that is neither,
+			// and GOCACHE has to be somewhere writable - a sandboxed editor may
+			// have no HOME that Go would pick by default.
+			const env = {
+				...process.env,
+				GO111MODULE: 'on',
+				GOFLAGS: '',
+				GOCACHE: process.env.GOCACHE || path.join(path.dirname(dest), 'gocache'),
+			};
+			cp.execFile(go, ['build', '-o', dest, '.'], { cwd: toolSrcDir, env }, (err, _stdout, stderr) => {
 				if (err) {
 					if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-						reject(new GoNotFoundError());
+						reject(new GoNotFoundError([go]));
 					} else {
-						reject(new Error(`go build failed: ${stderr || err.message}`));
+						reject(new Error(`go build failed (using ${go}): ${stderr || err.message}`));
 					}
 					return;
+				}
+				try {
+					// go build sets the executable bit itself, but a helper left
+					// behind by an interrupted build, or restored from an archive
+					// that drops modes, would be unrunnable with no clear reason.
+					fs.chmodSync(dest, 0o755);
+				} catch {
+					// Windows has no mode to set, and a failure here shows up
+					// immediately as an exec error with a better message.
 				}
 				resolve();
 			});

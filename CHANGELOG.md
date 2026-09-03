@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.7.1
+
+### Finding Go on Linux and macOS
+
+A GUI editor does not run a login shell, so it inherits the desktop session's
+`PATH` rather than the one `.bashrc` or `.zshrc` builds. The official Go
+tarball tells you to add `/usr/local/go/bin` in exactly those files, and asdf,
+mise and gvm all work the same way - so `go` working in a terminal said
+nothing about whether the extension could see it, and when it could not the
+only symptom was "Go was not found on PATH".
+
+The search now covers `goforms.goPath`, `go.goroot`, `GOROOT`, `PATH` and the
+usual install locations on each platform, verifying each candidate by running
+`go version` rather than trusting the file to be there. When it still fails,
+the message lists every place it looked and names the setting to fix it.
+
+- New setting `goforms.goPath` for a toolchain in an unusual place.
+- New command **`GoForms: Check Setup`**: which `go` was found, where it
+  looked, whether the helper CLI builds and answers, and the framework path.
+- The build runs with `GO111MODULE=on`, an empty `GOFLAGS` and a writable
+  `GOCACHE`, so an environment configured for vendored or GOPATH-mode builds
+  cannot break it, and the helper is chmod +x'd after it is written.
+
+### Line endings
+
+`.gitattributes` pins the working tree to LF. The helper writes LF and gofmt
+normalises whole files to it, so a CRLF checkout turned every designer edit
+into a mixed-ending file and a whole-file diff.
+
 ## 0.7.0
 
 ### Generated handler stubs name their package
