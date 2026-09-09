@@ -235,13 +235,25 @@ function install() {
 		return root.descendants.find((el) => el.id === id) || null;
 	};
 
+	// Drags are driven from document-level mousemove/mouseup listeners that
+	// the mousedown handler installs and the mouseup handler removes, so
+	// these have to be recorded, not swallowed: without them a test can press
+	// the mouse down but never move or release it.
+	const docListeners = {};
 	const document = {
 		body: root,
 		createElement: (tag) => new Element(tag),
 		getElementById: findById,
 		querySelector: (sel) => root.querySelector(sel),
 		querySelectorAll: (sel) => root.querySelectorAll(sel),
-		addEventListener: () => {},
+		addEventListener: (type, fn) => {
+			(docListeners[type] = docListeners[type] || []).push(fn);
+		},
+		removeEventListener: (type, fn) => {
+			const list = docListeners[type] || [];
+			const i = list.indexOf(fn);
+			if (i >= 0) list.splice(i, 1);
+		},
 		elementsFromPoint: () => [],
 	};
 
@@ -300,6 +312,13 @@ function install() {
 		send(msg) {
 			for (const fn of windowListeners.message || []) fn({ data: msg });
 		},
+		/** docDispatch fires a document-level event, as a drag needs. */
+		docDispatch(type, event) {
+			const e = Object.assign({ preventDefault() {}, stopPropagation() {} }, event);
+			for (const fn of (docListeners[type] || []).slice()) fn(e);
+		},
+		/** docListenerCount is how a test catches drag listeners left behind. */
+		docListenerCount: (type) => (docListeners[type] || []).length,
 		el: findById,
 	};
 }

@@ -1,6 +1,6 @@
 package aboutform
 
-import "goforms"
+import "github.com/Go-Forms/GoForms"
 
 // AboutForm.go: hand-written event handlers, mirrors the WinForms partial
 // class's non-designer half.

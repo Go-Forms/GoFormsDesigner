@@ -193,8 +193,16 @@ func appendStub(path string, fileCreated bool, designerPath, receiverType, recvV
 }
 
 const (
-	goformsImportPath = "goforms"
-	goformsPkg        = "goforms"
+	// goformsImportPath is what a new stub's import line is written as.
+	goformsImportPath = "github.com/Go-Forms/GoForms"
+	// goformsPkg is the package name that path binds, and the one generated
+	// code spells - `goforms.NewButton(...)` - regardless of the path.
+	goformsPkg = "goforms"
+	// legacyImportPath is the module path from before the framework was
+	// published. Projects still on it are recognized, so a stub added to one
+	// uses the import it already has instead of adding a second, conflicting
+	// one for the same package.
+	legacyImportPath = "goforms"
 )
 
 // stubText renders the empty handler method.
@@ -222,7 +230,9 @@ func qualify(paramType, pkg string) string {
 
 // goformsAlias reports the name path refers to the goforms package by, and
 // whether it imports it at all. A file importing it under an alias gets stubs
-// spelled with that alias rather than a second, conflicting import.
+// spelled with that alias rather than a second, conflicting import, and the
+// pre-publication module path counts as an import too - a project still on it
+// is a working project, not one to add a duplicate import to.
 func goformsAlias(path string) (string, bool) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
@@ -231,7 +241,7 @@ func goformsAlias(path string) (string, bool) {
 	}
 	for _, imp := range f.Imports {
 		p, err := strconv.Unquote(imp.Path.Value)
-		if err != nil || p != goformsImportPath {
+		if err != nil || (p != goformsImportPath && p != legacyImportPath) {
 			continue
 		}
 		if imp.Name != nil {
@@ -242,7 +252,7 @@ func goformsAlias(path string) (string, bool) {
 	return "", false
 }
 
-// withGoformsImport returns src with `import "goforms"` added, joining an
+// withGoformsImport returns src with the goforms import added, joining an
 // existing import block or opening one after the package clause.
 func withGoformsImport(src string) (string, error) {
 	fset := token.NewFileSet()

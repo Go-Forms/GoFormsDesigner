@@ -76,7 +76,7 @@ func TestEnsureHandlerAddsTheMissingImport(t *testing.T) {
 	})
 
 	src := ensure(t, designer, "btn_Click", "MouseEventArgs")
-	if strings.Count(src, `"goforms"`) != 1 {
+	if strings.Count(src, `"`+goformsImportPath+`"`) != 1 {
 		t.Fatalf("want exactly one goforms import:\n%s", src)
 	}
 	if !strings.Contains(src, "e goforms.MouseEventArgs") {
@@ -157,4 +157,23 @@ func assertParses(t *testing.T, src string) {
 	if _, err := parser.ParseFile(token.NewFileSet(), "", src, parser.ParseComments); err != nil {
 		t.Fatalf("generated file does not parse: %v\n%s", err, src)
 	}
+}
+
+// A project created before the framework was published imports it by its old
+// module path. That is still a working project, and a stub added to one must
+// use the import already there rather than adding a second one for the same
+// package under a different path.
+func TestEnsureHandlerRecognisesTheLegacyImportPath(t *testing.T) {
+	designer := handlerDir(t, map[string]string{
+		"MainForm.go": "package mainform\n\nimport \"goforms\"\n\nfunc (mf *MainForm) existing(sender any, e goforms.EventArgs) {\n}\n",
+	})
+
+	src := ensure(t, designer, "btn_Click", "MouseEventArgs")
+	if strings.Contains(src, goformsImportPath) {
+		t.Fatalf("a second import was added for the same package:\n%s", src)
+	}
+	if !strings.Contains(src, "e goforms.MouseEventArgs") {
+		t.Fatalf("stub is not qualified:\n%s", src)
+	}
+	assertParses(t, src)
 }

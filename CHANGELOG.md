@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.8.0
+
+### New projects use the published framework
+
+GoForms is now a real module: `github.com/Go-Forms/GoForms`. Scaffolding used
+to write `replace goforms => <a path on this machine>` into every new project,
+because there was no path `go build` could resolve. That made every generated
+project unclonable - it built only on the machine that created it.
+
+`Create New Project` now asks where the framework should come from and
+defaults to the published module, so the generated `go.mod` is a plain
+`require` and the project is self-contained. Building against a local checkout
+is still offered, for working on the framework itself, and is the option that
+adds a `replace`.
+
+Generated designer files and handler stubs import the new path. A project
+still on the old `goforms` path is recognized as importing the package, so a
+stub added to one uses the import already there instead of adding a second,
+conflicting one.
+
+### The form's own properties
+
+Selecting nothing on the canvas showed "Select a control" and nothing else, so
+the form's title and size were editable only by dragging a 14px handle in the
+canvas's bottom-right corner - which, on a form larger than the visible canvas,
+sits past the scroll. There was no way at all to make a too-big form smaller.
+
+The properties panel now shows the Form when nothing is selected, with Title,
+Width and Height, the way WinForms shows the form's properties when you click
+its background. The handle still works.
+
 ## 0.7.2
 
 Marketplace metadata. The manifest carried none of what a gallery page is

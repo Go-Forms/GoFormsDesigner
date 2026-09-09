@@ -6,6 +6,12 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
+/** The framework's published module path, and the import every generated
+ * file uses. It is one constant because it appears in three places that must
+ * agree: the scaffolded go.mod, the generated designer file's import, and the
+ * handler stubs the Go helper writes (see tool/ensurehandler.go). */
+export const GOFORMS_MODULE = 'github.com/Go-Forms/GoForms';
+
 import {
 	computeReplacePath,
 	copyTemplateDir,
@@ -103,17 +109,46 @@ async function createProject(context: vscode.ExtensionContext): Promise<void> {
 		return;
 	}
 
-	const frameworkPath = await resolveFrameworkPath(parentFolder);
-	if (!frameworkPath) {
-		// User cancelled the framework-path picker; nothing sane to scaffold.
+	// The framework is a published module, so the default project depends on
+	// the released version and needs nothing local. A `replace` is for working
+	// against a checkout - useful when developing the framework itself, wrong
+	// as a default, because it pins every new project to one machine's layout
+	// and breaks the moment the project is cloned anywhere else.
+	const sourcePick = await vscode.window.showQuickPick(
+		[
+			{
+				label: 'Use the published module',
+				description: `require ${GOFORMS_MODULE}`,
+				detail: 'Recommended. go build fetches it; the project is self-contained and clones anywhere.',
+				local: false,
+			},
+			{
+				label: 'Use a local checkout',
+				description: 'adds a replace directive',
+				detail: 'For working on the framework itself. Ties the project to a path on this machine.',
+				local: true,
+			},
+		],
+		{ title: 'GoForms: where should this project get the framework?' }
+	);
+	if (!sourcePick) {
 		return;
 	}
 
-	const replacePath = computeReplacePath(projectRoot, frameworkPath);
+	let replaceBlock = '';
+	if (sourcePick.local) {
+		const frameworkPath = await resolveFrameworkPath(parentFolder);
+		if (!frameworkPath) {
+			// The picker was cancelled; there is nothing sane to scaffold.
+			return;
+		}
+		replaceBlock = `\nreplace ${GOFORMS_MODULE} => ${computeReplacePath(projectRoot, frameworkPath)}\n`;
+	}
+
 	const templateDir = path.join(context.extensionPath, 'templates', kindPick.template);
 
 	try {
-		await copyTemplateDir(templateDir, projectRoot, { MODULE: projectName, FRAMEWORK_PATH: replacePath });
+		await copyTemplateDir(templateDir, projectRoot, { MODULE: projectName, REPLACE_BLOCK: replaceBlock });
 	} catch (err) {
 		vscode.window.showErrorMessage(`Failed to create project: ${(err as Error).message}`);
 		return;
@@ -183,7 +218,7 @@ async function resolveTargetFolder(folderUri?: vscode.Uri): Promise<string | und
 function generateDesignerFile(formName: string, packageName: string): string {
 	return `package ${packageName}
 
-import "goforms"
+import "github.com/Go-Forms/GoForms"
 
 // ${formName}-designer.go is the generated-looking half of the WinForms-style
 // partial-class split: field declarations and initializeComponent() live

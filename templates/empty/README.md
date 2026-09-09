@@ -21,8 +21,7 @@ go run .
       MainForm.go            <- hand-written: event handlers, business logic
       MainForm-designer.go   <- layout: field decls + initializeComponent()
   main.go
-  go.mod                     <- requires "goforms"; replace directive points
-                                 at your local GoForms checkout
+  go.mod                     <- require github.com/Go-Forms/GoForms
 ```
 
 Right-click the `Forms` folder (or any folder) in VS Code's Explorer and

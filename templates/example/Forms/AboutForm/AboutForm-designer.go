@@ -1,6 +1,6 @@
 package aboutform
 
-import "goforms"
+import "github.com/Go-Forms/GoForms"
 
 // AboutForm-designer.go: layout only, mirrors the WinForms designer file.
 type AboutForm struct {

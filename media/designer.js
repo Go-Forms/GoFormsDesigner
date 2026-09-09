@@ -2026,6 +2026,9 @@
 		const digest = JSON.stringify([
 			selectedId,
 			selectedIds.size,
+			// The form's own panel is what shows when nothing is selected, so
+			// its values belong in the digest too.
+			model && [model.formTitle, model.formWidth, model.formHeight],
 			// The parent picker lists every container on the form, so it goes
 			// stale when controls are added or removed elsewhere.
 			model ? model.controls.map((c) => c.id) : null,
@@ -2044,10 +2047,8 @@
 		const scroll = panel.scrollTop;
 		panel.innerHTML = '';
 		if (!spec) {
-			const empty = document.createElement('div');
-			empty.className = 'prop-empty';
-			empty.textContent = 'Select a control on the canvas to edit its properties.';
-			panel.appendChild(empty);
+			appendFormGroup(panel);
+			panel.scrollTop = scroll;
 			return;
 		}
 
@@ -2712,6 +2713,92 @@
 			}
 			g.appendChild(row);
 		}
+		panel.appendChild(g);
+	}
+
+	// appendFormGroup is what the properties panel shows when nothing is
+	// selected: the Form's own title and size, as WinForms shows the form's
+	// properties when you click its background.
+	//
+	// Dragging the canvas's corner handle is the other way to resize, but it
+	// is only reachable when the whole form fits on screen - on a form larger
+	// than the canvas viewport the handle sits past the scroll, which left no
+	// way at all to make a big form smaller.
+	function appendFormGroup(panel) {
+		const h3 = document.createElement('h3');
+		h3.textContent = `Form · ${model.receiverType}`;
+		panel.appendChild(h3);
+
+		const hint = document.createElement('div');
+		hint.className = 'hint';
+		hint.style.marginBottom = '10px';
+		hint.textContent = 'Select a control on the canvas to edit it instead.';
+		panel.appendChild(hint);
+
+		const g = groupEl('Form');
+
+		const send = (title, w, h) => {
+			post({
+				type: 'apply',
+				ops: [{ op: 'setForm', id: '', w, h, text: title }],
+			});
+		};
+
+		const titleRow = document.createElement('div');
+		titleRow.className = 'prop-row';
+		const titleLabel = document.createElement('span');
+		titleLabel.className = 'prop-name';
+		titleLabel.textContent = 'Title';
+		titleRow.appendChild(titleLabel);
+		const titleInput = document.createElement('input');
+		titleInput.type = 'text';
+		titleInput.value = model.formTitle || '';
+		const commitTitle = () => {
+			const v = titleInput.value;
+			if (v && v !== model.formTitle) {
+				send(v, model.formWidth, model.formHeight);
+			}
+		};
+		titleInput.addEventListener('change', commitTitle);
+		titleInput.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') titleInput.blur();
+		});
+		titleRow.appendChild(titleInput);
+		g.appendChild(titleRow);
+
+		// Width and height go together in one op: the tool rewrites both
+		// arguments of NewForm at once, so sending one without the other
+		// would overwrite it with the value already on screen.
+		const sizeInput = (name, current, apply) => {
+			const row = document.createElement('div');
+			row.className = 'prop-row';
+			const label = document.createElement('span');
+			label.className = 'prop-name';
+			label.textContent = name;
+			row.appendChild(label);
+			const input = document.createElement('input');
+			input.type = 'number';
+			input.min = name === 'Width' ? '100' : '80';
+			input.value = String(current);
+			const commit = () => {
+				const v = Math.round(Number(input.value));
+				if (Number.isFinite(v) && v >= Number(input.min) && v !== current) {
+					apply(v);
+				} else {
+					input.value = String(current);
+				}
+			};
+			input.addEventListener('change', commit);
+			input.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') input.blur();
+			});
+			row.appendChild(input);
+			g.appendChild(row);
+		};
+
+		sizeInput('Width', model.formWidth, (v) => send('', v, model.formHeight));
+		sizeInput('Height', model.formHeight, (v) => send('', model.formWidth, v));
+
 		panel.appendChild(g);
 	}
 

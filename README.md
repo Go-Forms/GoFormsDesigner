@@ -12,7 +12,7 @@ for Go. Provides:
 
 - **`GoForms: Create New Project...`** - scaffolds a new GoForms app (empty
   or a full example) with a correct `go.mod` (including the local
-  `replace goforms => ...` directive), `main.go`, and a `MainForm`.
+  correct `go.mod`), `main.go`, and a `MainForm`.
 - **`GoForms: New Form...`** - available from the command palette and from
   the Explorer's folder right-click menu - adds a new `<Name>/<Name>.go` +
   `<Name>-designer.go` pair to any folder.
@@ -159,10 +159,15 @@ changes after a reload (`Ctrl+R` / `Cmd+R` in the dev host window).
 - A Go toolchain. It is needed only the first time the designer runs, to
   build `tool/*.go` into a helper binary cached in the extension's global
   storage.
-- A local GoForms checkout somewhere on disk (for the `replace goforms => ...`
-  directive new projects need). `Create New Project` will try to find one
-  automatically near where you're creating the project, or ask you to
-  point at it once via `GoForms: Set Framework Path...`.
+- Nothing else. `Create New Project` scaffolds against the published
+  `github.com/Go-Forms/GoForms` module, which `go build` fetches like any
+  other dependency.
+
+  It also offers to build against a local checkout instead, which adds a
+  `replace` directive. That is for working on the framework itself: it ties
+  the project to a path on one machine, so it is the second option rather than
+  the default. Point it at your checkout once with
+  `GoForms: Set Framework Path...`.
 
 ### If it cannot find Go (usually Linux or macOS)
 

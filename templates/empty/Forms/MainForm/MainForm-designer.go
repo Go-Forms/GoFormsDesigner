@@ -1,6 +1,6 @@
 package mainform
 
-import "goforms"
+import "github.com/Go-Forms/GoForms"
 
 // MainForm-designer.go is the generated-looking half of the WinForms-style
 // partial-class split: field declarations and initializeComponent() live

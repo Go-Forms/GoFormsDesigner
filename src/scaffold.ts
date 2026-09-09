@@ -10,20 +10,25 @@ import * as fsSync from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-/** Tokens substituted into template files at copy time. */
+/** Tokens substituted into template files at copy time.
+ *
+ * REPLACE_BLOCK is the whole `replace ... => ...` line including its
+ * surrounding blank line, or empty. It is a block rather than just a path
+ * because the common project has no replace directive at all, and a template
+ * cannot omit a line it has already written. */
 export interface TemplateTokens {
 	MODULE: string;
-	FRAMEWORK_PATH: string;
+	REPLACE_BLOCK: string;
 }
 
 function substitute(content: string, tokens: TemplateTokens): string {
 	return content
 		.split('{{MODULE}}').join(tokens.MODULE)
-		.split('{{FRAMEWORK_PATH}}').join(tokens.FRAMEWORK_PATH);
+		.split('{{REPLACE_BLOCK}}').join(tokens.REPLACE_BLOCK);
 }
 
 /** Recursively copies every file under srcDir into destDir, substituting
- * `{{MODULE}}` / `{{FRAMEWORK_PATH}}` tokens in each file's text content.
+ * `{{MODULE}}` / `{{REPLACE_BLOCK}}` tokens in each file's text content.
  * All template files are plain text (Go source, go.mod, README.md), so
  * reading everything as utf8 is safe. */
 export async function copyTemplateDir(srcDir: string, destDir: string, tokens: TemplateTokens): Promise<void> {
@@ -77,8 +82,8 @@ async function isGoFormsCheckout(dir: string): Promise<boolean> {
 	}
 }
 
-/** Resolves the local GoForms framework checkout to use for the new
- * project's `replace goforms => ...` directive.
+/** Resolves a local GoForms checkout, for the projects that opt into building
+ * against one instead of the published module.
  *
  * Order of preference:
  *   1. The `goforms.frameworkPath` setting, if set and it looks valid.

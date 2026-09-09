@@ -144,11 +144,15 @@ func mustControl(r *parseResult, id string) (*pcontrol, error) {
 	return pc, nil
 }
 
-// planSetForm resizes the Form itself: goforms.NewForm(title, w, h)'s w/h
-// args in the New<ReceiverType> constructor, and - if present - a
-// `<recv>.SetClientSize(w, h)` call inside initializeComponent, which runs
-// after NewForm and would otherwise silently override this resize. Neither
-// is a "control" (no ID), so this can't reuse mustControl/planSetBounds.
+// planSetForm edits the Form itself: the title and w/h arguments of
+// goforms.NewForm(title, w, h) in the New<ReceiverType> constructor, and - if
+// present - a `<recv>.SetClientSize(w, h)` call inside initializeComponent,
+// which runs after NewForm and would otherwise silently override the resize.
+// The Form is not a "control" (it has no ID), so this cannot reuse
+// mustControl/planSetBounds.
+//
+// Text is optional: an op that carries none resizes without touching the
+// title, which is what a drag of the canvas's resize handle sends.
 func planSetForm(r *parseResult, op Op) ([]edit, error) {
 	if len(r.formSizeArgs) != 3 {
 		return nil, fmt.Errorf("could not locate goforms.NewForm(title, w, h) to resize")
@@ -164,6 +168,19 @@ func planSetForm(r *parseResult, op Op) ([]edit, error) {
 			offset(r.fset, r.clientSizeArgs[0].Pos()),
 			offset(r.fset, r.clientSizeArgs[1].End()),
 			newArgs,
+		})
+	}
+	if op.Text != "" {
+		// Only a string literal can be rewritten in place. A title built from
+		// a constant or a call is someone's deliberate choice, and replacing
+		// the expression with a literal would throw it away.
+		if _, ok := litString(r.formSizeArgs[0]); !ok {
+			return nil, fmt.Errorf("the form's title is not a plain string literal, so it cannot be edited here")
+		}
+		edits = append(edits, edit{
+			offset(r.fset, r.formSizeArgs[0].Pos()),
+			offset(r.fset, r.formSizeArgs[0].End()),
+			strconv.Quote(op.Text),
 		})
 	}
 	return edits, nil

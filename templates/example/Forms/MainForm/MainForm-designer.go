@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"image/draw"
 
-	"goforms"
+	"github.com/Go-Forms/GoForms"
 )
 
 // MainForm-designer.go is the generated-looking half of the WinForms-style

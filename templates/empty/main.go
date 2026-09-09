@@ -1,7 +1,7 @@
 package main
 
 import (
-	"goforms"
+	"github.com/Go-Forms/GoForms"
 
 	mainform "{{MODULE}}/Forms/MainForm"
 )
