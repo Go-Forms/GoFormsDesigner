@@ -10,5 +10,6 @@ import (
 // same as a WinForms Program.cs Main() calling Application.Run(new MainForm()).
 func main() {
 	goforms.NewApplication("com.example.{{MODULE}}")
+{{THEME_CALL}}
 	goforms.Run(mainform.NewMainForm().Form)
 }

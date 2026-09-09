@@ -19,16 +19,104 @@ import * as vscode from 'vscode';
 export interface TemplateTokens {
 	MODULE: string;
 	REPLACE_BLOCK: string;
+	/** The line main() calls to apply a theme, or empty for the default look. */
+	THEME_CALL: string;
+	/** The body of the goforms.Theme literal in the styles file. */
+	THEME_BODY: string;
 }
 
 function substitute(content: string, tokens: TemplateTokens): string {
 	return content
 		.split('{{MODULE}}').join(tokens.MODULE)
-		.split('{{REPLACE_BLOCK}}').join(tokens.REPLACE_BLOCK);
+		.split('{{REPLACE_BLOCK}}').join(tokens.REPLACE_BLOCK)
+		.split('{{THEME_CALL}}').join(tokens.THEME_CALL)
+		.split('{{THEME_BODY}}').join(tokens.THEME_BODY);
 }
 
-/** Recursively copies every file under srcDir into destDir, substituting
- * `{{MODULE}}` / `{{REPLACE_BLOCK}}` tokens in each file's text content.
+/** One of the looks offered when a project is created.
+ *
+ * `body` is the literal the styles file starts from. It is a starting point,
+ * not a fixed set: the editor can add or remove any field afterwards, and a
+ * field left out keeps Fyne's default for it. */
+export interface ThemeChoice {
+	label: string;
+	description: string;
+	detail: string;
+	/** false for the look you get by writing no theme at all. */
+	styles: boolean;
+	body?: string;
+}
+
+export const themeChoices: ThemeChoice[] = [
+	{
+		label: 'Default look',
+		description: 'no styles file',
+		detail: "Fyne's own theme, which follows the operating system's light/dark setting.",
+		styles: false,
+	},
+	{
+		label: 'Light',
+		description: '<project>-styles.go, editable',
+		detail: 'A plain light scheme to start from.',
+		styles: true,
+		body: [
+			'\t\tName:            "Light",',
+			'\t\tBackground:      goforms.RGB(0xF5, 0xF5, 0xF7),',
+			'\t\tForeground:      goforms.RGB(0x1A, 0x1A, 0x1E),',
+			'\t\tPrimary:         goforms.RGB(0x2E, 0x7D, 0xE0),',
+			'\t\tInputBackground: goforms.RGB(0xFF, 0xFF, 0xFF),',
+			'\t\tButtonColor:     goforms.RGB(0xE4, 0xE6, 0xEB),',
+			'\t\tBorder:          goforms.RGB(0xC2, 0xC6, 0xCE),',
+			'\t\tPlaceholder:     goforms.RGB(0x8A, 0x8F, 0x98),',
+			'',
+		].join('\n'),
+	},
+	{
+		label: 'Dark',
+		description: '<project>-styles.go, editable',
+		detail: 'A plain dark scheme to start from.',
+		styles: true,
+		body: [
+			'\t\tName:            "Dark",',
+			'\t\tDark:            true,',
+			'\t\tBackground:      goforms.RGB(0x1E, 0x1F, 0x22),',
+			'\t\tForeground:      goforms.RGB(0xE6, 0xE7, 0xEA),',
+			'\t\tPrimary:         goforms.RGB(0x4C, 0x97, 0xFF),',
+			'\t\tInputBackground: goforms.RGB(0x2A, 0x2C, 0x31),',
+			'\t\tButtonColor:     goforms.RGB(0x34, 0x37, 0x3D),',
+			'\t\tBorder:          goforms.RGB(0x4A, 0x4E, 0x56),',
+			'\t\tPlaceholder:     goforms.RGB(0x8A, 0x8F, 0x98),',
+			'',
+		].join('\n'),
+	},
+	{
+		label: 'Empty theme',
+		description: '<project>-styles.go, nothing set',
+		detail: 'A styles file with no fields, so every choice is yours and the editor starts blank.',
+		styles: true,
+		body: '',
+	},
+];
+
+/** tokensFor turns a theme choice into the two substitutions the templates
+ * need. A project with no styles file gets no call in main() rather than a
+ * commented-out one: dead code in a generated file is something to delete,
+ * not something to read. */
+export function themeTokens(choice: ThemeChoice): Pick<TemplateTokens, 'THEME_CALL' | 'THEME_BODY'> {
+	if (!choice.styles) {
+		return { THEME_CALL: '', THEME_BODY: '' };
+	}
+	return {
+		THEME_CALL: '\tgoforms.SetTheme(Theme())\n',
+		THEME_BODY: choice.body ?? '',
+	};
+}
+
+/** Recursively copies every file under srcDir into destDir, substituting the
+ * `{{TOKEN}}` markers in each file's content *and* in its name - the styles
+ * file is called `{{MODULE}}-styles.go`, so the name carries a token like the
+ * content does.
+ *
  * All template files are plain text (Go source, go.mod, README.md), so
  * reading everything as utf8 is safe. */
 export async function copyTemplateDir(srcDir: string, destDir: string, tokens: TemplateTokens): Promise<void> {
@@ -36,7 +124,7 @@ export async function copyTemplateDir(srcDir: string, destDir: string, tokens: T
 	const entries = await fs.readdir(srcDir, { withFileTypes: true });
 	for (const entry of entries) {
 		const srcPath = path.join(srcDir, entry.name);
-		const destPath = path.join(destDir, entry.name);
+		const destPath = path.join(destDir, substitute(entry.name, tokens));
 		if (entry.isDirectory()) {
 			await copyTemplateDir(srcPath, destPath, tokens);
 		} else {

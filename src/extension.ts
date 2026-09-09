@@ -14,6 +14,8 @@ export const GOFORMS_MODULE = 'github.com/Go-Forms/GoForms';
 
 import {
 	computeReplacePath,
+	themeChoices,
+	themeTokens,
 	copyTemplateDir,
 	pathExists,
 	resolveFrameworkPath,
@@ -145,10 +147,29 @@ async function createProject(context: vscode.ExtensionContext): Promise<void> {
 		replaceBlock = `\nreplace ${GOFORMS_MODULE} => ${computeReplacePath(projectRoot, frameworkPath)}\n`;
 	}
 
+	const themePick = await vscode.window.showQuickPick(
+		themeChoices.map((c) => ({ ...c, description: c.description.replace('<project>', projectName) })),
+		{ title: 'GoForms: how should this project look?' }
+	);
+	if (!themePick) {
+		return;
+	}
+
 	const templateDir = path.join(context.extensionPath, 'templates', kindPick.template);
+	const tokens = {
+		MODULE: projectName,
+		REPLACE_BLOCK: replaceBlock,
+		...themeTokens(themePick),
+	};
 
 	try {
-		await copyTemplateDir(templateDir, projectRoot, { MODULE: projectName, REPLACE_BLOCK: replaceBlock });
+		await copyTemplateDir(templateDir, projectRoot, tokens);
+		if (themePick.styles) {
+			// The styles file is generated rather than living in each
+			// template, because a template file cannot decline to be written
+			// and most projects will not want one.
+			await copyTemplateDir(path.join(context.extensionPath, 'templates', 'styles'), projectRoot, tokens);
+		}
 	} catch (err) {
 		vscode.window.showErrorMessage(`Failed to create project: ${(err as Error).message}`);
 		return;
