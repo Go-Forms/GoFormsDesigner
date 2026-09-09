@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.8.1
+
+### The form resizes from its edges
+
+One 14px corner dot meant every resize was diagonal, and it was a small target
+to find. The form now has the grips a window has: the right edge for width, the
+bottom edge for height, the corner for both. The edges run the full length of
+the form, so there is always something to grab, and an edge grip ignores
+movement on the axis it does not own - a hand that drifts while dragging the
+right edge cannot also change the height.
+
+### Getting back out of a control's properties
+
+Selecting a control and then wanting the form back required clicking a piece
+of canvas background - and a form covered edge to edge by a docked control has
+none, which left a control's properties as the only thing the panel would ever
+show again.
+
+Four ways back now, so one of them always applies:
+
+- click the form's background,
+- click its title bar,
+- click the area beside the form,
+- press <kbd>Escape</kbd> - which needs nowhere to click at all. Pressing it
+  while typing in a property field is left to the field.
+
+Starting a resize also selects the form, since that is what you are resizing.
+
 ## 0.8.0
 
 ### New projects use the published framework

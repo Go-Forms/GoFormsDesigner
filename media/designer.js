@@ -123,6 +123,15 @@
 			deleteSelection();
 			return;
 		}
+		// Escape goes back to the form. It is the way out that does not
+		// depend on finding somewhere to click: a form covered edge to edge
+		// by a docked control has no background left, and then a control's
+		// properties were the only thing the panel would ever show again.
+		if (e.key === 'Escape' && !isTypingTarget(e.target)) {
+			e.preventDefault();
+			selectForm();
+			return;
+		}
 		if (!(e.ctrlKey || e.metaKey)) return;
 		const key = e.key.toLowerCase();
 		if (key === 'z' && !e.shiftKey) {
@@ -272,6 +281,18 @@
 		let canvas = $('form-canvas');
 		if (canvas) return canvas;
 
+		const scrollHost = $('canvas-scroll');
+		if (scrollHost && !scrollHost.dataset.deselectBound) {
+			// Bound once, and marked so a later canvas rebuild does not stack
+			// a second listener on the element that survives it.
+			scrollHost.dataset.deselectBound = '1';
+			scrollHost.addEventListener('mousedown', (e) => {
+				if (e.target === scrollHost) {
+					selectForm();
+				}
+			});
+		}
+
 		// A canvas built from scratch invalidates everything we were tracking.
 		rendered.clear();
 		prevDigests = [];
@@ -285,22 +306,45 @@
 		titleBar.className = 'form-titlebar';
 		canvas.appendChild(titleBar);
 
-		const formHandle = document.createElement('div');
-		formHandle.className = 'form-resize-handle';
-		formHandle.title = 'Drag to resize the form';
-		formHandle.addEventListener('mousedown', onFormResizeMouseDown);
-		canvas.appendChild(formHandle);
+		// Three grips, as a real window has: the right edge for width, the
+		// bottom edge for height, the corner for both. A single corner dot
+		// meant every resize was diagonal, and it was a 14px target - on a
+		// form larger than the visible canvas it also sat past the scroll.
+		// The edges are full-length, so there is always something to grab.
+		for (const [cls, axis, hint] of [
+			['form-grip-right', 'x', 'Drag to change the form width'],
+			['form-grip-bottom', 'y', 'Drag to change the form height'],
+			['form-grip-corner', 'xy', 'Drag to resize the form'],
+		]) {
+			const grip = document.createElement('div');
+			grip.className = 'form-grip ' + cls;
+			grip.title = hint;
+			grip.addEventListener('mousedown', (e) => onFormResizeMouseDown(e, axis));
+			canvas.appendChild(grip);
+		}
 
+		// Clicking the form - its background, or its title bar - selects the
+		// form itself, which is how you get back out of a control's
+		// properties. `e.target === canvas` is the test for "not on a child",
+		// since a control's own handler stops the event before it gets here.
 		canvas.addEventListener('mousedown', (e) => {
 			if (e.target === canvas) {
-				setSelection(null, false);
-				updateSelectionClasses();
-				renderProperties();
+				selectForm();
 			}
 		});
+		titleBar.addEventListener('mousedown', selectForm);
 
 		scroll.appendChild(canvas);
 		return canvas;
+	}
+
+	// selectForm clears the control selection and shows the form's own
+	// properties. Several things route here, because a form covered edge to
+	// edge by a docked control has no background left to click.
+	function selectForm() {
+		setSelection(null, false);
+		updateSelectionClasses();
+		renderProperties();
 	}
 
 	// ---------------------------------------------------------------------
@@ -1954,14 +1998,14 @@
 
 	let formResizeState = null;
 
-	function onFormResizeMouseDown(e) {
+	// axis is 'x', 'y' or 'xy' - which of the two dimensions this grip moves.
+	function onFormResizeMouseDown(e, axis) {
 		e.stopPropagation();
 		e.preventDefault();
-		selectedId = null;
-		updateSelectionClasses();
-		renderProperties();
+		selectForm();
 
 		formResizeState = {
+			axis: axis || 'xy',
 			startClientX: e.clientX,
 			startClientY: e.clientY,
 			origW: model.formWidth,
@@ -1976,8 +2020,11 @@
 
 	function onFormResizeMove(e) {
 		if (!formResizeState) return;
-		const dx = e.clientX - formResizeState.startClientX;
-		const dy = e.clientY - formResizeState.startClientY;
+		// An edge grip ignores movement on the axis it does not own, so a
+		// hand that drifts while dragging the right edge cannot also change
+		// the height.
+		const dx = formResizeState.axis === 'y' ? 0 : e.clientX - formResizeState.startClientX;
+		const dy = formResizeState.axis === 'x' ? 0 : e.clientY - formResizeState.startClientY;
 		if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
 			formResizeState.moved = true;
 		}

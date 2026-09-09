@@ -976,18 +976,69 @@ body {
 
 /* Form (window) resize handle - always visible (unlike a control's, which
    only shows on selection) so resizing the form itself is discoverable. */
-.form-resize-handle {
+/* The form's resize grips: one down the right edge, one along the bottom,
+   one in the corner - the arrangement a window has.
+
+   They are full-length rather than a single dot, because a dot makes every
+   resize diagonal and gives a 14px target to find. The edges sit just outside
+   the canvas so they never cover a control, and they draw only on hover so
+   they do not compete with the design for attention. */
+.form-grip {
 	position: absolute;
+	background: transparent;
+	transition: background 90ms ease;
+	z-index: 6;
+}
+.form-grip:hover,
+.form-grip:active {
+	background: var(--vscode-focusBorder, #0078d4);
+}
+
+.form-grip-right {
+	top: 0;
+	right: -5px;
+	width: 9px;
+	height: 100%;
+	cursor: ew-resize;
+	border-radius: 0 4px 4px 0;
+}
+
+.form-grip-bottom {
+	left: 0;
+	bottom: -5px;
+	height: 9px;
+	width: 100%;
+	cursor: ns-resize;
+	border-radius: 0 0 4px 4px;
+}
+
+/* The corner sits above both edges, so the overlap resizes both axes. */
+.form-grip-corner {
 	right: -6px;
 	bottom: -6px;
-	width: 14px;
-	height: 14px;
+	width: 16px;
+	height: 16px;
 	background: var(--vscode-focusBorder, #0078d4);
 	border: 2px solid var(--vscode-editor-background);
 	border-radius: 3px;
 	cursor: nwse-resize;
-	z-index: 6;
+	z-index: 7;
 }
+.form-grip-corner:hover { background: var(--vscode-focusBorder, #0078d4); }
+
+/* A hint that the edges are there at all, without drawing them full-strength
+   until the pointer is on one. */
+#form-canvas:hover .form-grip-right,
+#form-canvas:hover .form-grip-bottom {
+	background: color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 28%, transparent);
+}
+#form-canvas .form-grip-right:hover,
+#form-canvas .form-grip-bottom:hover {
+	background: var(--vscode-focusBorder, #0078d4);
+}
+
+/* The title bar selects the form, so it should look clickable. */
+#form-canvas .form-titlebar { cursor: pointer; }
 
 /* ---------- Properties panel ---------- */
 

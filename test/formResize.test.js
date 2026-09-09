@@ -55,22 +55,53 @@ function boot() {
 	return dom;
 }
 
-function handle(dom) {
-	const el = dom.el('form-canvas').querySelectorAll('.form-resize-handle')[0];
-	assert.ok(el, 'the canvas has no form resize handle');
+/** grip returns one of the form's three resize grips. */
+function grip(dom, which) {
+	const el = dom.el('form-canvas').querySelectorAll('.form-grip-' + which)[0];
+	assert.ok(el, `the canvas has no ${which} grip`);
 	return el;
 }
 
-/** drag runs a complete press-move-release over the form's handle. */
-function drag(dom, dx, dy) {
-	handle(dom).dispatch('mousedown', { clientX: 100, clientY: 100 });
+const handle = (dom) => grip(dom, 'corner');
+
+/** drag runs a complete press-move-release over one grip. */
+function dragGrip(dom, which, dx, dy) {
+	grip(dom, which).dispatch('mousedown', { clientX: 100, clientY: 100 });
 	dom.docDispatch('mousemove', { clientX: 100 + dx, clientY: 100 + dy });
 	dom.docDispatch('mouseup', {});
 }
 
-test('the form resize handle exists on the canvas', () => {
+const drag = (dom, dx, dy) => dragGrip(dom, 'corner', dx, dy);
+
+test('the form has a grip on each edge and in the corner', () => {
 	const dom = boot();
-	assert.ok(handle(dom));
+	for (const which of ['right', 'bottom', 'corner']) {
+		assert.ok(grip(dom, which), `missing the ${which} grip`);
+	}
+});
+
+test('the right grip changes only the width', () => {
+	const dom = boot();
+	dragGrip(dom, 'right', 120, 90);
+
+	const applies = dom.posted.filter((m) => m.type === 'apply');
+	assert.deepEqual(applies[0].ops, [{ op: 'setForm', id: '', w: 920, h: 600 }]);
+});
+
+test('the bottom grip changes only the height', () => {
+	const dom = boot();
+	dragGrip(dom, 'bottom', 120, 90);
+
+	const applies = dom.posted.filter((m) => m.type === 'apply');
+	assert.deepEqual(applies[0].ops, [{ op: 'setForm', id: '', w: 800, h: 690 }]);
+});
+
+test('the corner grip changes both', () => {
+	const dom = boot();
+	dragGrip(dom, 'corner', 120, 90);
+
+	const applies = dom.posted.filter((m) => m.type === 'apply');
+	assert.deepEqual(applies[0].ops, [{ op: 'setForm', id: '', w: 920, h: 690 }]);
 });
 
 test('dragging the handle saves the new form size', () => {
@@ -220,4 +251,80 @@ test('an unchanged title sends nothing', () => {
 	input.dispatch('change', {});
 
 	assert.equal(dom.posted.filter((m) => m.type === 'apply').length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Getting back out of a control's properties
+// ---------------------------------------------------------------------------
+
+/** selectButton clicks the control the fixture puts on the canvas. */
+function selectButton(dom) {
+	const el = dom.el('form-canvas').querySelectorAll('.ctrl').find((e) => e.dataset.id === 'btn1');
+	assert.ok(el, 'no canvas element for btn1');
+	el.dispatch('mousedown', { clientX: 0, clientY: 0 });
+	assert.match(panelText(dom), /Button/, 'the control was not selected');
+	return el;
+}
+
+const panelText = (dom) => dom.el('properties-panel').descendants.map((e) => e.textContent).join(' | ');
+
+test('clicking the form background goes back to the form', () => {
+	const dom = boot();
+	selectButton(dom);
+
+	const canvas = dom.el('form-canvas');
+	canvas.dispatch('mousedown', { clientX: 400, clientY: 400, target: canvas });
+
+	assert.match(panelText(dom), /Form · MainForm/);
+});
+
+test('clicking the title bar goes back to the form', () => {
+	const dom = boot();
+	selectButton(dom);
+
+	dom.el('form-canvas').querySelectorAll('.form-titlebar')[0].dispatch('mousedown', {});
+
+	assert.match(panelText(dom), /Form · MainForm/);
+});
+
+// A form covered edge to edge by a docked control has no background left to
+// click, so clicking beside it has to work too.
+test('clicking beside the form goes back to the form', () => {
+	const dom = boot();
+	selectButton(dom);
+
+	const scroll = dom.el('canvas-scroll');
+	scroll.dispatch('mousedown', { clientX: 5, clientY: 5, target: scroll });
+
+	assert.match(panelText(dom), /Form · MainForm/);
+});
+
+// The guaranteed way out: it needs nowhere to click at all.
+test('Escape goes back to the form', () => {
+	const dom = boot();
+	selectButton(dom);
+
+	dom.keydown({ key: 'Escape', target: dom.el('form-canvas') });
+
+	assert.match(panelText(dom), /Form · MainForm/);
+});
+
+test('Escape while typing in a property field is left to the field', () => {
+	const dom = boot();
+	selectButton(dom);
+
+	const input = dom.el('properties-panel').descendants.find((e) => e.tagName === 'INPUT');
+	assert.ok(input, 'the properties panel has no input to type in');
+	dom.keydown({ key: 'Escape', target: input });
+
+	assert.match(panelText(dom), /Button/, 'the selection should not have changed');
+});
+
+test('starting a resize also selects the form', () => {
+	const dom = boot();
+	selectButton(dom);
+
+	grip(dom, 'corner').dispatch('mousedown', { clientX: 100, clientY: 100 });
+	assert.match(panelText(dom), /Form · MainForm/);
+	dom.docDispatch('mouseup', {});
 });

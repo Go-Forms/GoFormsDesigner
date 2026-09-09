@@ -37,8 +37,14 @@ into the extension's global storage (requires `go` on `PATH`).
 
 ## Editing
 
-**Canvas.** Drag to move, drag the corner handle to resize, drag the form's
-own handle to resize the form. Ctrl or Shift click extends the selection;
+**Canvas.** Drag to move, drag the corner handle to resize. The form itself
+has grips on its right edge, its bottom edge and its corner - width, height,
+both.
+
+**Selecting the form.** Click its background, click its title bar, click
+beside it, or press <kbd>Escape</kbd>. Its title and size are then in the
+properties panel. Escape is the one that always works: a form filled edge to
+edge by a docked control has no background left to click. Ctrl or Shift click extends the selection;
 dragging any member then moves the whole group, and edges snap to siblings'
 left/right/centre with a guide line drawn where they line up.
 

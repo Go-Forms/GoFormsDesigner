@@ -312,6 +312,11 @@ function install() {
 		send(msg) {
 			for (const fn of windowListeners.message || []) fn({ data: msg });
 		},
+		/** keydown fires a window-level key event, as the editor does. */
+		keydown(event) {
+			const e = Object.assign({ preventDefault() {}, stopPropagation() {} }, event);
+			for (const fn of (windowListeners.keydown || []).slice()) fn(e);
+		},
 		/** docDispatch fires a document-level event, as a drag needs. */
 		docDispatch(type, event) {
 			const e = Object.assign({ preventDefault() {}, stopPropagation() {} }, event);
