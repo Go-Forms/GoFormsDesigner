@@ -11,6 +11,8 @@
 //	goformsdesigner apply <designer.go>   (ops JSON array on stdin)
 //	goformsdesigner ensure-handler <designer.go> <receiverType> <recvVar> <method> [paramType|none]
 //	goformsdesigner tidy <designer.go>
+//	goformsdesigner theme-parse <name-styles.go>
+//	goformsdesigner theme-apply <name-styles.go>   (ops JSON array on stdin)
 //	goformsdesigner catalog
 //	goformsdesigner categories
 package main
@@ -23,7 +25,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		stderrf("usage: goformsdesigner parse|apply|tidy|ensure-handler|catalog|categories ...")
+		stderrf("usage: goformsdesigner parse|apply|tidy|theme-parse|theme-apply|ensure-handler|catalog|categories ...")
 		os.Exit(2)
 	}
 
@@ -35,6 +37,10 @@ func main() {
 		err = cmdApply(os.Args[2:])
 	case "tidy":
 		err = cmdTidy(os.Args[2:])
+	case "theme-parse":
+		err = cmdThemeParse(os.Args[2:])
+	case "theme-apply":
+		err = cmdThemeApply(os.Args[2:])
 	case "ensure-handler":
 		err = cmdEnsureHandler(os.Args[2:])
 	case "catalog":
@@ -117,6 +123,38 @@ func cmdEnsureHandler(args []string) error {
 		return err
 	}
 	return printJSON(res)
+}
+
+// cmdThemeParse reads a project's <name>-styles.go into the flat field list
+// the theme editor renders.
+func cmdThemeParse(args []string) error {
+	if len(args) != 1 {
+		return errUsage("theme-parse <name-styles.go>")
+	}
+	r, err := parseThemeFile(args[0])
+	if err != nil {
+		return err
+	}
+	return printJSON(r.model)
+}
+
+func cmdThemeApply(args []string) error {
+	if len(args) != 1 {
+		return errUsage("theme-apply <name-styles.go> (ops JSON array on stdin)")
+	}
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return err
+	}
+	var ops []ThemeOp
+	if err := json.Unmarshal(raw, &ops); err != nil {
+		return err
+	}
+	model, err := applyThemeOps(args[0], ops)
+	if err != nil {
+		return err
+	}
+	return printJSON(model)
 }
 
 // cmdCatalog dumps the known control type table so the extension's toolbox
