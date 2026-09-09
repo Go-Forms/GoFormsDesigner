@@ -91,6 +91,26 @@ extension keeps its own snapshot history instead.
 WinForms Format commands — align left/right/top/bottom, centre, same
 width/height — all measured against the last-clicked control.
 
+## Themes
+
+`GoForms: Edit Theme` opens a project's `<name>-styles.go` - the one
+`goforms.Theme` literal that decides how the whole application looks - as a
+visual editor: a picker and a hex box per colour, numbers for the metrics, and
+a preview beside them showing them together.
+
+A theme field left out keeps Fyne's default for that property, so *unset* is a
+real state rather than a blank. Every row has a clear button to return to it,
+and an unset colour is still drawn in the preview as the default it falls
+through to.
+
+The file is ordinary Go and stays the source of truth. Fields are spliced
+individually, so comments inside the literal survive an edit; a field holding
+an expression rather than a literal is shown read-only rather than being
+flattened into a hex value.
+
+New projects get a styles file when `Create New Project` is answered with
+anything but "Default look".
+
 ## Keeping the preview honest
 
 The canvas is meant to show what will really appear at runtime, so
@@ -234,7 +254,8 @@ src/
   scaffold.ts                <- template copying, token substitution, validation
   goTool.ts                  <- the only caller of the bundled Go CLI
   designerEditorProvider.ts  <- the designer's custom editor and its webview host
-media/                       <- webview assets: the canvas, its layout ports
+media/                       <- webview assets: the canvas and its layout
+                                ports, plus the theme editor
 templates/
   empty/                     <- minimal project (go.mod, main.go, MainForm)
   example/                   <- a fuller project, adapted from GoFormsDemo

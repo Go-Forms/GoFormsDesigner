@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.9.0
+
+### A theme editor
+
+The framework has had themes since the start, but nothing in the designer knew
+about them, so choosing a look meant knowing `goforms.SetTheme` exists,
+finding the `Theme` struct, writing the literal by hand, and running the app
+to see it.
+
+**`GoForms: Edit Theme`** opens a project's `<name>-styles.go` as a visual
+editor: every colour with a picker and a hex box, the metrics as numbers, and
+a live preview beside them. The preview is the point - a theme is eleven
+colours whose names say what they are called rather than what they do, and the
+only way to know whether `Border` reads against `Background` is to see them
+together.
+
+Set and unset are different states, and both are reachable. A field left out
+keeps Fyne's default, so every row has a clear button, and an unset field is
+still drawn in the preview as the default it falls through to - the preview
+shows what the theme will look like, not only what it sets.
+
+It follows the form designer's rules. The Go file is the source of truth,
+fields are spliced rather than the literal regenerated, and a field holding an
+expression - a named constant, a call - is shown read-only rather than
+flattened into a hex literal.
+
+### A theme when a project is created
+
+`Create New Project` now asks how the project should look: the default, a
+light or dark scheme to start from, or an empty theme. Anything but the
+default writes `<project>-styles.go` beside `main.go` and adds the `SetTheme`
+call before any form is created. A project that chose the default gets no call
+rather than a commented-out one.
+
 ## 0.8.1
 
 ### The form resizes from its edges

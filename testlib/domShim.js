@@ -267,6 +267,13 @@ function install() {
 		return el;
 	};
 
+	// The same skeleton themeEditorProvider.ts writes into the webview. It is
+	// built alongside the designer's rather than instead of it: the two never
+	// collide by id, and one install() then serves either client.
+	const themeApp = add(root, 'theme-app');
+	add(themeApp, 'fields');
+	add(themeApp, 'preview');
+
 	// The same skeleton designerEditorProvider.ts writes into the webview.
 	const app = add(root, 'app');
 	const main = add(app, 'main');

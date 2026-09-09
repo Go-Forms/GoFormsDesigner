@@ -1,0 +1,236 @@
+/* The theme editor's webview. Uses VS Code's own theme variables for its
+   chrome, so the editor itself follows the editor - only the preview is
+   painted in the colours being edited. */
+
+* { box-sizing: border-box; }
+
+body {
+	margin: 0;
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size, 13px);
+	color: var(--vscode-foreground);
+	background: var(--vscode-editor-background);
+}
+
+#app {
+	display: grid;
+	grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+	height: 100vh;
+}
+
+/* ---------- Fields ---------- */
+
+#fields {
+	overflow-y: auto;
+	padding: 14px 16px 32px;
+	border-right: 1px solid var(--vscode-panel-border, #444);
+}
+
+.group { margin-bottom: 22px; }
+.group h3 {
+	margin: 0 0 8px;
+	font-size: 11px;
+	letter-spacing: .08em;
+	text-transform: uppercase;
+	color: var(--vscode-descriptionForeground);
+}
+
+.row {
+	display: grid;
+	grid-template-columns: 1fr auto auto;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 6px;
+	margin: 0 -6px;
+	border-radius: 4px;
+	min-height: 30px;
+}
+.row:hover { background: var(--vscode-list-hoverBackground); }
+
+/* A set field is a decision; an unset one is a default. The marker is what
+   tells them apart at a glance, since an unset field still shows a value. */
+.row.set { border-left: 2px solid var(--vscode-focusBorder, #0078d4); padding-left: 8px; }
+
+.name {
+	font-size: 12px;
+	cursor: help;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.row:not(.set) .name { color: var(--vscode-descriptionForeground); }
+
+.value { display: flex; align-items: center; gap: 6px; }
+
+.value input[type="text"],
+.value input[type="number"] {
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 3px;
+	padding: 2px 6px;
+	font-family: inherit;
+	font-size: 12px;
+	width: 90px;
+}
+.value input[type="color"] {
+	width: 30px;
+	height: 22px;
+	padding: 0;
+	border: 1px solid var(--vscode-input-border, #666);
+	border-radius: 3px;
+	background: none;
+	cursor: pointer;
+}
+.hex {
+	width: 92px !important;
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.clear {
+	background: none;
+	border: none;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	font-size: 15px;
+	line-height: 1;
+	padding: 2px 5px;
+	border-radius: 3px;
+}
+.clear:hover {
+	background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.2));
+	color: var(--vscode-foreground);
+}
+
+.default-hint {
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+	opacity: .7;
+	padding: 0 5px;
+	cursor: help;
+}
+
+.raw {
+	grid-column: 2 / -1;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	background: var(--vscode-textCodeBlock-background, rgba(128,128,128,.12));
+	border-radius: 3px;
+	padding: 2px 6px;
+	cursor: help;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ---------- Preview ---------- */
+
+#preview {
+	overflow-y: auto;
+	padding: 28px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 14px;
+	background:
+		linear-gradient(45deg, rgba(128,128,128,0.05) 25%, transparent 25%),
+		linear-gradient(-45deg, rgba(128,128,128,0.05) 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, rgba(128,128,128,0.05) 75%),
+		linear-gradient(-45deg, transparent 75%, rgba(128,128,128,0.05) 75%);
+	background-size: 20px 20px;
+	background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+}
+
+.pv-window {
+	width: min(420px, 100%);
+	border: 1px solid;
+	border-radius: 6px;
+	overflow: hidden;
+	box-shadow: 0 6px 24px rgba(0,0,0,.35);
+	line-height: 1.5;
+}
+.pv-title { font-weight: 600; color: #fff; }
+.pv-body { display: flex; flex-direction: column; }
+.pv-heading { font-weight: 600; }
+
+.pv-input {
+	border-style: solid;
+	display: flex;
+	align-items: center;
+	min-height: 26px;
+}
+
+.pv-buttons { display: flex; flex-wrap: wrap; }
+.pv-btn {
+	color: #fff;
+	font-weight: 500;
+	text-align: center;
+	white-space: nowrap;
+}
+
+.pv-scroll-row { display: flex; }
+.pv-scroll {
+	flex: 1;
+	height: 8px;
+	border-radius: 4px;
+	position: relative;
+}
+.pv-thumb {
+	position: absolute;
+	left: 10%;
+	width: 45%;
+	height: 100%;
+	border-radius: 4px;
+}
+
+.pv-note {
+	max-width: 420px;
+	margin: 0;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	text-align: center;
+}
+
+/* ---------- Errors and toasts ---------- */
+
+.parse-error {
+	border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+	background: var(--vscode-inputValidation-errorBackground, rgba(190,17,0,.1));
+	border-radius: 4px;
+	padding: 14px 16px;
+}
+.parse-error h2 { margin: 0 0 8px; font-size: 14px; }
+.parse-error p { margin: 0 0 8px; font-size: 12px; }
+.parse-error pre {
+	margin: 0;
+	white-space: pre-wrap;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11px;
+}
+
+#toast-stack {
+	position: fixed;
+	right: 16px;
+	bottom: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	z-index: 20;
+}
+.toast {
+	background: var(--vscode-notifications-background, #333);
+	color: var(--vscode-notifications-foreground, #fff);
+	border: 1px solid var(--vscode-notificationCenter-border, #555);
+	border-radius: 4px;
+	padding: 8px 12px;
+	font-size: 12px;
+	max-width: 380px;
+}
+.toast.error { border-color: var(--vscode-inputValidation-errorBorder, #be1100); }
+
+@media (max-width: 760px) {
+	#app { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+	#fields { border-right: none; border-bottom: 1px solid var(--vscode-panel-border, #444); }
+}

@@ -2,7 +2,7 @@
   "name": "goforms-designer",
   "displayName": "GoForms Designer",
   "description": "Visual WinForms-style designer for GoForms: drag-and-drop editing of *-designer.go files, plus project/form scaffolding commands.",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "publisher": "goforms",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -44,6 +44,16 @@
   "main": "./dist/extension.js",
   "contributes": {
     "customEditors": [
+      {
+        "viewType": "goforms.themeEditor",
+        "displayName": "GoForms Theme",
+        "selector": [
+          {
+            "filenamePattern": "*-styles.go"
+          }
+        ],
+        "priority": "default"
+      },
       {
         "viewType": "goforms.designer",
         "displayName": "GoForms Designer",
@@ -93,6 +103,18 @@
         "command": "goforms.checkSetup",
         "title": "GoForms: Check Setup",
         "category": "GoForms"
+      },
+      {
+        "command": "goforms.editTheme",
+        "title": "GoForms: Edit Theme",
+        "category": "GoForms",
+        "icon": "$(symbol-color)"
+      },
+      {
+        "command": "goforms.openThemeAsText",
+        "title": "GoForms: Open Theme as Text",
+        "category": "GoForms",
+        "icon": "$(code)"
       }
     ],
     "menus": {
@@ -125,11 +147,28 @@
           "command": "goforms.checkSetup"
         },
         {
+          "command": "goforms.editTheme"
+        },
+        {
+          "command": "goforms.openThemeAsText",
+          "when": "resourceFilename =~ /-styles\\.go$/"
+        },
+        {
           "command": "goforms.tidyDesignerFile",
           "when": "resourceFilename =~ /-designer\\.go$/"
         }
       ],
       "editor/title": [
+        {
+          "command": "goforms.openThemeAsText",
+          "when": "activeCustomEditorId == 'goforms.themeEditor'",
+          "group": "navigation"
+        },
+        {
+          "command": "goforms.editTheme",
+          "when": "resourceFilename =~ /-styles\\.go$/ && activeCustomEditorId != 'goforms.themeEditor'",
+          "group": "navigation"
+        },
         {
           "command": "goforms.tidyDesignerFile",
           "when": "resourceFilename =~ /-designer\\.go$/",

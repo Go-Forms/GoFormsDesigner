@@ -120,6 +120,42 @@ export interface TidyResult {
 	removed: string[] | null;
 }
 
+/** One field of goforms.Theme, as tool/theme.go reports it. */
+export interface ThemeValue {
+	name: string;
+	kind: 'color' | 'bool' | 'number' | 'text';
+	role: string;
+	/** false when the field is absent, which is what makes it fall back to
+	 * Fyne's default - a different state from any value it could hold. */
+	set: boolean;
+	color?: string;
+	bool?: boolean;
+	number?: number;
+	text?: string;
+	/** false when the field holds an expression the tool cannot rewrite;
+	 * `raw` then shows what is actually there. */
+	editable: boolean;
+	raw?: string;
+}
+
+export interface ThemeModel {
+	file: string;
+	package: string;
+	/** The function returning the literal, e.g. "Theme". */
+	funcName: string;
+	fields: ThemeValue[];
+	note: string;
+}
+
+export interface ThemeOp {
+	op: 'set' | 'unset';
+	field: string;
+	color?: string;
+	bool?: boolean;
+	number?: number;
+	text?: string;
+}
+
 export interface EnsureHandlerResult {
 	file: string;
 	method: string;
@@ -383,6 +419,17 @@ export class GoFormsTool {
 	 * the explicit command and for files edited outside the designer. */
 	async tidy(designerPath: string): Promise<TidyResult> {
 		return JSON.parse(await this.run(['tidy', designerPath]));
+	}
+
+	/** Reads a project's <name>-styles.go into its theme fields. */
+	async themeParse(stylesPath: string): Promise<ThemeModel> {
+		return JSON.parse(await this.run(['theme-parse', stylesPath]));
+	}
+
+	/** Applies theme edits and returns the freshly re-parsed model. The batch
+	 * is atomic: a failure leaves the file exactly as it was. */
+	async themeApply(stylesPath: string, ops: ThemeOp[]): Promise<ThemeModel> {
+		return JSON.parse(await this.run(['theme-apply', stylesPath], JSON.stringify(ops)));
 	}
 
 	async catalog(): Promise<Record<string, ControlDesc>> {

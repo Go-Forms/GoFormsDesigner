@@ -33,6 +33,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 
 	registerDesignerEditorIfAvailable(context);
+	registerThemeEditor(context);
 }
 
 export function deactivate(): void {
@@ -65,6 +66,17 @@ function registerDesignerEditorIfAvailable(context: vscode.ExtensionContext): vo
 		} else {
 			console.error('[GoForms Designer] Failed to register the visual designer editor provider:', err);
 		}
+	}
+}
+
+/** Registers the theme editor. Loaded the same defensive way as the designer:
+ * a failure in one editor should not take the commands down with it. */
+function registerThemeEditor(context: vscode.ExtensionContext): void {
+	try {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		require('./themeEditorProvider').register(context);
+	} catch (err) {
+		console.error('[GoForms Designer] Failed to register the theme editor:', err);
 	}
 }
 
