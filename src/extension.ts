@@ -18,25 +18,32 @@ import {
 	themeChoices,
 	themeTokens,
 	copyTemplateDir,
+	copyTemplateFile,
+	generateLogicFile,
 	pathExists,
 	resolveFrameworkPath,
 	validateGoIdentifier,
 	validateModuleName,
 } from './scaffold';
-import { registerBuildCommands } from './build';
+import { registerBuildCommands, resolveProject } from './build';
+import { registerNavigation } from './navigate';
 import { stopAllServers } from './serve';
+import { registerStatus } from './status';
 import { describeTools } from './tools';
 
 export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('goforms.createProject', () => createProject(context)),
 		vscode.commands.registerCommand('goforms.newForm', (folderUri?: vscode.Uri) => newForm(folderUri)),
+		vscode.commands.registerCommand('goforms.newTheme', (folderUri?: vscode.Uri) => newTheme(context, folderUri)),
 		vscode.commands.registerCommand('goforms.setFrameworkPath', () => setFrameworkPath()),
 		vscode.commands.registerCommand('goforms.tidyDesignerFile', (uri?: vscode.Uri) => tidyDesignerFile(context, uri)),
 		vscode.commands.registerCommand('goforms.checkSetup', () => checkSetup(context))
 	);
 
 	registerBuildCommands(context);
+	registerNavigation(context);
+	registerStatus(context);
 	registerDesignerEditorIfAvailable(context);
 	registerThemeEditor(context);
 }
@@ -242,6 +249,88 @@ async function newForm(folderUri?: vscode.Uri): Promise<void> {
 	await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(designerPath));
 }
 
+/** Adds a theme to a project that was created without one.
+ *
+ * A project answers "how should this look" once, when it is created, and a
+ * project that answered "the default" had no way back: the theme editor edits
+ * `<name>-styles.go`, and there was nothing to open. This writes that file,
+ * from the same starting points the project wizard offers, and adds the
+ * SetTheme call to main() - without which the file is written and ignored,
+ * which is worse than not having it.
+ */
+async function newTheme(context: vscode.ExtensionContext, folderUri?: vscode.Uri): Promise<void> {
+	const project = await resolveProject(folderUri);
+	if (!project) {
+		return;
+	}
+
+	const stylesPath = path.join(project.root, `${project.name}-styles.go`);
+	if (pathExists(stylesPath)) {
+		const open = await vscode.window.showWarningMessage(
+			`${path.basename(stylesPath)} already exists - this project has a theme.`,
+			'Open it'
+		);
+		if (open) {
+			await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(stylesPath));
+		}
+		return;
+	}
+
+	const choice = await vscode.window.showQuickPick(
+		themeChoices.filter((t) => t.styles).map((t) => ({ label: t.label, detail: t.detail, choice: t })),
+		{ title: `GoForms: theme for ${project.name}`, matchOnDetail: true }
+	);
+	if (!choice) {
+		return;
+	}
+
+	try {
+		const template = path.join(context.extensionPath, 'templates', 'styles', '{{MODULE}}-styles.go');
+		const tokens = { MODULE: project.name, ...themeTokens(choice.choice) };
+		await copyTemplateFile(template, stylesPath, tokens);
+	} catch (err) {
+		vscode.window.showErrorMessage(`Failed to write the theme: ${(err as Error).message}`);
+		return;
+	}
+
+	const wired = await wireSetTheme(path.join(project.root, 'main.go'));
+	await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(stylesPath));
+	vscode.window.showInformationMessage(
+		wired
+			? `GoForms: added ${path.basename(stylesPath)} and called SetTheme in main.go.`
+			: `GoForms: added ${path.basename(stylesPath)}. Call goforms.SetTheme(Theme()) before the first form is created.`
+	);
+}
+
+/** Adds `goforms.SetTheme(Theme())` to main(), before the first form is
+ * created - a theme applied afterwards leaves the form already built with the
+ * old one. Reports false if the file is not shaped the way the templates
+ * write it, rather than guessing at an edit. */
+async function wireSetTheme(mainPath: string): Promise<boolean> {
+	let source: string;
+	try {
+		source = await fs.readFile(mainPath, 'utf8');
+	} catch {
+		return false;
+	}
+	if (/SetTheme\s*\(/.test(source)) {
+		return true;
+	}
+
+	const lines = source.split('\n');
+	const mainLine = lines.findIndex((l) => /^func\s+main\s*\(\s*\)\s*{/.test(l));
+	if (mainLine < 0) {
+		return false;
+	}
+	lines.splice(mainLine + 1, 0, '\tgoforms.SetTheme(Theme())');
+	try {
+		await fs.writeFile(mainPath, lines.join('\n'), 'utf8');
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 async function resolveTargetFolder(folderUri?: vscode.Uri): Promise<string | undefined> {
 	if (folderUri) {
 		return folderUri.fsPath;
@@ -283,14 +372,6 @@ func (f *${formName}) initializeComponent() {
 	f.SetClientSize(500, 350)
 	f.CenterOnScreen()
 }
-`;
-}
-
-function generateLogicFile(formName: string, packageName: string): string {
-	return `package ${packageName}
-
-// ${formName}.go is the hand-written half of the partial-class split: event
-// handlers and business logic go here. Layout lives in ${formName}-designer.go.
 `;
 }
 

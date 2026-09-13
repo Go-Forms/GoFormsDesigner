@@ -76,31 +76,77 @@ is selected.
 ## Commands
 
 All of these are in the command palette (Ctrl+Shift+P). Most are also on a
-menu: the designer's toolbar has run and build, `*-designer.go` files have
-Open as Text and Tidy in the editor title bar, and a folder's right-click menu
-in the Explorer has New Form.
+menu: the status bar has **GoForms** on the left, the designer's toolbar has
+run, run-in-browser and build, `*-designer.go` files have Open as Text and
+Tidy in the editor title bar, and a folder's right-click menu in the Explorer
+has New Form and New Theme.
+
+### Making things
 
 | Command | What it does |
 | --- | --- |
-| **GoForms: Create New Project…** | Scaffolds a project — go.mod, main.go, a first form, build tasks, a .gitignore. Asks for a template (empty, example, web, android) and a look. |
+| **GoForms: Create New Project…** | Scaffolds a project — go.mod, main.go, a first form, build tasks, a .gitignore. Asks for a template (empty, example, web, android) and a look. Also a button on the Explorer's welcome screen when there is no project open. |
 | **GoForms: New Form…** | Adds a `Forms/<Name>/` pair: the designer file and the hand-written one. |
+| **GoForms: New Theme…** | Writes `<project>-styles.go` into a project created without one, from the same starting points the wizard offers, and adds the `SetTheme` call to main(). |
+
+### Editing
+
+| Command | What it does |
+| --- | --- |
 | **GoForms: Open Visual Designer** | Opens the current `*-designer.go` as a canvas. |
 | **GoForms: Open as Text** | The same file back as Go source. |
+| **GoForms: View Code** (F7) | Jumps from the designer to the form's handlers, writing the file if it is not there yet. |
+| **GoForms: View Designer** (Shift+F7) | Jumps back. The same two keys Visual Studio uses. |
 | **GoForms: Tidy Designer File** | Runs the cleanup pass by hand, for a file edited outside the designer. |
 | **GoForms: Edit Theme** | Opens a project's `<name>-styles.go` as the visual theme editor. |
 | **GoForms: Open Theme as Text** | The same file back as Go source. |
+
+### Running and building
+
+| Command | What it does |
+| --- | --- |
+| **GoForms: Run…** | Asks where — desktop, browser or Android — and does the whole thing. This is what the status bar entry runs. |
+| **GoForms: Run on Desktop** | `go run .`. Also the play button on the designer's toolbar. |
+| **GoForms: Run in Browser (WebAssembly)** | Builds for `js/wasm`, serves it on a loopback port and opens it. One step, because a browser cannot launch a `.wasm` off the disk. |
 | **GoForms: Build…** | Asks which target to build: desktop, WebAssembly or Android. |
 | **GoForms: Build for Desktop** | `go build` into `build/desktop/`. |
-| **GoForms: Run on Desktop** | Builds and runs it. Also the play button on the designer's toolbar. |
 | **GoForms: Build for WebAssembly** | Compiles for the browser and assembles the loader page into `build/wasm/`. |
-| **GoForms: Serve WebAssembly Build in Browser** | Serves that build on a loopback port and opens it. |
+| **GoForms: Serve WebAssembly Build in Browser** | Serves an existing build without rebuilding it. |
+| **GoForms: Stop the WebAssembly Server** | Closes the local server. It also closes when the window does. |
 | **GoForms: Build for Android (APK)** | Packages an APK into `build/android/`. |
 | **GoForms: Install APK on Connected Device (adb)** | Installs the newest APK on a phone over adb. |
+
+### Finding things
+
+| Command | What it does |
+| --- | --- |
 | **GoForms: Check Setup** | Reports which Go was found and everywhere it looked, whether the helper builds, and what is present for WebAssembly and Android. |
 | **GoForms: Set Framework Path…** | Points a project at a local GoForms checkout. |
 | **GoForms: Set Android NDK Path…** | For an NDK somewhere the search does not cover. |
 | **GoForms: Set fyne CLI Path…** | Likewise for the fyne tool. |
 | **GoForms: Open Setup Guide** | The bundled guides for the Android NDK, the fyne CLI and WebAssembly. |
+
+## Snippets
+
+The canvas is for layout. The other half of the work — a handler, a dialog
+raised in code, a control added to a container at runtime — is typing, so
+there are snippets for it. Type `gf` in any Go file to see all 35.
+
+| Prefix | |
+| --- | --- |
+| `gfform` `gfmain` | a whole form, and the `main()` that runs it |
+| `gfhandler` `gfwire` | a handler with the right `EventArgs` type, and the `.Handle(…)` that connects it |
+| `gfbutton` `gflabel` `gftextbox` `gftextarea` `gfpassword` `gfcheckbox` `gfradio` `gfcombo` `gflistbox` `gfgrid` `gftree` | one control each: construct, place, add |
+| `gfgroupbox` `gfpanel` `gftabs` | containers |
+| `gfanchor` `gfdock` | resize behaviour |
+| `gfmsgbox` `gfinputbox` `gfopenfile` `gfsavefile` | dialogs |
+| `gfshow` `gfshowdialog` `gfclose` | opening and closing a second form |
+| `gfmenu` `gftoolbar` `gfstatusbar` `gfcontextmenu` | the window's furniture |
+| `gftimer` `gftheme` `gfload` `gfclosing` | a timer, a theme, and the two form events |
+
+Each control snippet writes all three lines a control needs — construct, place,
+add — because a control that is constructed and never added is the mistake that
+produces an empty form.
 
 ## Things worth knowing
 
@@ -123,8 +169,19 @@ in the Explorer has New Form.
 - **A control the catalogue does not model is left alone.** The cleanup pass
   only touches statements it understands, so hand-written setup inside
   `initializeComponent` survives.
+- **F7 and Shift+F7 move between the two halves of a form** — the layout the
+  designer writes and the handlers you write — the same keys Visual Studio
+  binds them to. F7 on a form with no code file yet writes it.
 - **The first run needs Go** and takes a moment: the helper that parses and
   rewrites your files is compiled then, into the extension's storage.
+- **Nothing here needs the network.** The designer, the theme editor, the
+  snippets, the setup guides and the WebAssembly loader page all ship inside
+  the extension, and the webviews are served under `default-src 'none'`, so
+  there is no font or script to fail to arrive. The two things that do need a
+  connection are Go fetching your project's modules the first time, and
+  downloading the Android NDK — both are yours to do, once. Turn on
+  `goforms.build.offline` to have builds run with `GOPROXY=off`, so a module
+  missing from the cache fails by name instead of hanging.
 
 ## Requirements
 
@@ -141,12 +198,16 @@ Setup** reports what this machine has.
 
 ## Getting started
 
-Run **GoForms: Create New Project…** from the command palette and answer
-three questions: where the project goes, which template, and how it should
-look. Open the MainForm-designer.go it created — the designer opens with it —
-and drag a control onto the canvas. Wire its Click event from the Events
-panel, and the handler stub appears in MainForm.go for you to fill in. Press
-the run button on the designer's toolbar to see it.
+Run **GoForms: Create New Project…** from the command palette — or press the
+**Create GoForms Project** button on the Explorer's welcome screen — and
+answer three questions: where the project goes, which template, and how it
+should look. Open the MainForm-designer.go it created — the designer opens
+with it — and drag a control onto the canvas. Wire its Click event from the
+Events panel, and the handler stub appears in MainForm.go for you to fill in.
+Press the run button on the designer's toolbar to see it.
+
+There is also a walkthrough: **Help → Get Started → Get Started with
+GoForms**.
 
 An existing GoForms project needs none of that: open any designer file.
 

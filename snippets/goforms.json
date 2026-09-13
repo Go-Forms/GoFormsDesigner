@@ -1,0 +1,435 @@
+{
+  "//": [
+    "Snippets for GoForms, for the half of the work the canvas is not for:",
+    "typing a control into initializeComponent by hand, writing a handler, or",
+    "raising a dialog in code the designer never touches.",
+    "",
+    "Every control snippet writes the three lines a control needs - construct,",
+    "place, add - because a control that is constructed and never added is the",
+    "mistake that produces a form with nothing on it. Each ends with the",
+    "AddControl call as the last tab stop, so retargeting it at a container is",
+    "one edit away.",
+    "",
+    "The prefixes are gf<thing>, which is short enough to type and does not",
+    "collide with Go's own keywords or with gopls' completions."
+  ],
+  "Form (designer half)": {
+    "prefix": "gfform",
+    "description": "A whole designer file: the struct, the constructor and initializeComponent",
+    "body": [
+      "package ${1:mainform}",
+      "",
+      "import goforms \"github.com/Go-Forms/GoForms\"",
+      "",
+      "// ${2:MainForm}-designer.go is the generated-looking half of the WinForms-style",
+      "// partial-class split: field declarations and initializeComponent() live",
+      "// here. Hand-written logic and event handler bodies belong in ${2:MainForm}.go.",
+      "type ${2:MainForm} struct {",
+      "\t*goforms.Form",
+      "\t$3",
+      "}",
+      "",
+      "// New${2:MainForm} mirrors \"new ${2:MainForm}()\" - allocate, then initializeComponent.",
+      "func New${2:MainForm}() *${2:MainForm} {",
+      "\tf := &${2:MainForm}{Form: goforms.NewForm(\"${4:Title}\", ${5:800}, ${6:600})}",
+      "\tf.initializeComponent()",
+      "\treturn f",
+      "}",
+      "",
+      "// initializeComponent mirrors the WinForms designer's InitializeComponent():",
+      "// pure layout, no business logic.",
+      "func (f *${2:MainForm}) initializeComponent() {",
+      "\tf.SetClientSize(${5:800}, ${6:600})",
+      "\t$0",
+      "}"
+    ]
+  },
+  "Application entry point": {
+    "prefix": "gfmain",
+    "description": "main() that creates the application and runs the first form",
+    "body": [
+      "package main",
+      "",
+      "import (",
+      "\tgoforms \"github.com/Go-Forms/GoForms\"",
+      "",
+      "\t${1:mainform} \"${2:myapp}/Forms/${3:MainForm}\"",
+      ")",
+      "",
+      "func main() {",
+      "\tgoforms.NewApplication(\"com.example.${2:myapp}\")",
+      "\tgoforms.Run(${1:mainform}.New${3:MainForm}().Form)",
+      "}"
+    ]
+  },
+  "Event handler": {
+    "prefix": "gfhandler",
+    "description": "A handler with the (sender, e) signature the events use",
+    "body": [
+      "func (f *${1:MainForm}) ${2:btnOK}_${3|Click,DoubleClick,MouseDown,MouseUp,MouseEnter,MouseLeave,GotFocus,LostFocus|}(sender any, e goforms.${4|MouseEventArgs,EventArgs,KeyEventArgs|}) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "Wire an event": {
+    "prefix": "gfwire",
+    "description": "Attach a handler, the += of the framework",
+    "body": "f.${1:btnOK}.${2|Click,DoubleClick,MouseDown,MouseUp,KeyDown,TextChanged,CheckedChanged,SelectedIndexChanged,ValueChanged|}.Handle(f.${1:btnOK}_${2:Click})$0"
+  },
+  "Button": {
+    "prefix": "gfbutton",
+    "description": "Button: construct, place, wire and add",
+    "body": [
+      "f.${1:btnOK} = goforms.NewButton(\"${2:OK}\")",
+      "f.${1:btnOK}.SetBounds(${3:16}, ${4:16}, ${5:100}, ${6:32})",
+      "f.${1:btnOK}.Click.Handle(f.${1:btnOK}_Click)",
+      "f.${7:AddControl}(f.${1:btnOK})$0"
+    ]
+  },
+  "Label": {
+    "prefix": "gflabel",
+    "description": "Label",
+    "body": [
+      "f.${1:lblName} = goforms.NewLabel(\"${2:Name:}\")",
+      "f.${1:lblName}.SetBounds(${3:16}, ${4:16}, ${5:120}, ${6:24})",
+      "f.${7:AddControl}(f.${1:lblName})$0"
+    ]
+  },
+  "TextBox": {
+    "prefix": "gftextbox",
+    "description": "TextBox with a placeholder",
+    "body": [
+      "f.${1:txtName} = goforms.NewTextBox()",
+      "f.${1:txtName}.SetBounds(${2:16}, ${3:48}, ${4:200}, ${5:30})",
+      "f.${1:txtName}.SetPlaceholder(\"${6:your name}\")",
+      "f.${7:AddControl}(f.${1:txtName})$0"
+    ]
+  },
+  "Multiline TextBox": {
+    "prefix": "gftextarea",
+    "description": "Multiline TextBox",
+    "body": [
+      "f.${1:txtNotes} = goforms.NewMultilineTextBox()",
+      "f.${1:txtNotes}.SetBounds(${2:16}, ${3:48}, ${4:300}, ${5:96})",
+      "f.${6:AddControl}(f.${1:txtNotes})$0"
+    ]
+  },
+  "Password TextBox": {
+    "prefix": "gfpassword",
+    "description": "TextBox with the characters masked",
+    "body": [
+      "f.${1:txtPass} = goforms.NewPasswordTextBox()",
+      "f.${1:txtPass}.SetBounds(${2:16}, ${3:48}, ${4:200}, ${5:30})",
+      "f.${6:AddControl}(f.${1:txtPass})$0"
+    ]
+  },
+  "CheckBox": {
+    "prefix": "gfcheckbox",
+    "description": "CheckBox",
+    "body": [
+      "f.${1:chkAgree} = goforms.NewCheckBox(\"${2:I agree}\")",
+      "f.${1:chkAgree}.SetBounds(${3:16}, ${4:16}, ${5:200}, ${6:26})",
+      "f.${1:chkAgree}.CheckedChanged.Handle(f.${1:chkAgree}_CheckedChanged)",
+      "f.${7:AddControl}(f.${1:chkAgree})$0"
+    ]
+  },
+  "RadioButton group": {
+    "prefix": "gfradio",
+    "description": "Three radio buttons and the group that makes them exclusive",
+    "body": [
+      "f.${1:rbSmall} = goforms.NewRadioButton(\"${2:Small}\")",
+      "f.${1:rbSmall}.SetBounds(${3:16}, ${4:16}, 96, 28)",
+      "f.AddControl(f.${1:rbSmall})",
+      "",
+      "f.${5:rbLarge} = goforms.NewRadioButton(\"${6:Large}\")",
+      "f.${5:rbLarge}.SetBounds(${3:16}, ${7:52}, 96, 28)",
+      "f.AddControl(f.${5:rbLarge})",
+      "",
+      "// Without a group they are independent check marks.",
+      "f.${8:sizeGroup} = goforms.NewRadioButtonGroup()",
+      "f.${8:sizeGroup}.Add(f.${1:rbSmall})",
+      "f.${8:sizeGroup}.Add(f.${5:rbLarge})$0"
+    ]
+  },
+  "ComboBox": {
+    "prefix": "gfcombo",
+    "description": "ComboBox with items",
+    "body": [
+      "f.${1:cboCountry} = goforms.NewComboBox(${2:\"Germany\", \"Japan\", \"Norway\"})",
+      "f.${1:cboCountry}.SetBounds(${3:16}, ${4:16}, ${5:200}, ${6:30})",
+      "f.${1:cboCountry}.SelectedIndexChanged.Handle(f.${1:cboCountry}_SelectedIndexChanged)",
+      "f.${7:AddControl}(f.${1:cboCountry})$0"
+    ]
+  },
+  "ListBox": {
+    "prefix": "gflistbox",
+    "description": "ListBox with items",
+    "body": [
+      "f.${1:lstItems} = goforms.NewListBox(${2:\"Apple\", \"Banana\", \"Cherry\"})",
+      "f.${1:lstItems}.SetBounds(${3:16}, ${4:16}, ${5:200}, ${6:160})",
+      "f.${1:lstItems}.SelectedIndexChanged.Handle(f.${1:lstItems}_SelectedIndexChanged)",
+      "f.${7:AddControl}(f.${1:lstItems})$0"
+    ]
+  },
+  "DataGridView": {
+    "prefix": "gfgrid",
+    "description": "DataGridView with columns and a row",
+    "body": [
+      "f.${1:grid} = goforms.NewDataGridView(${2:\"Order\", \"Customer\", \"Total\"})",
+      "f.${1:grid}.SetBounds(${3:16}, ${4:16}, ${5:600}, ${6:300})",
+      "f.${1:grid}.AddRow(${7:\"1001\", \"Acme Corp\", \"$1,240.00\"})",
+      "f.${1:grid}.SelectionChanged.Handle(f.${1:grid}_SelectionChanged)",
+      "f.${8:AddControl}(f.${1:grid})$0"
+    ]
+  },
+  "TreeView": {
+    "prefix": "gftree",
+    "description": "TreeView with a root node",
+    "body": [
+      "f.${1:tree} = goforms.NewTreeView()",
+      "f.${1:tree}.SetBounds(${2:16}, ${3:16}, ${4:240}, ${5:300})",
+      "${6:root} := f.${1:tree}.AddNode(nil, \"${7:Project}\")",
+      "f.${1:tree}.AddNode(${6:root}, \"${8:main.go}\")",
+      "f.${9:AddControl}(f.${1:tree})$0"
+    ]
+  },
+  "GroupBox": {
+    "prefix": "gfgroupbox",
+    "description": "GroupBox, and a control placed inside it",
+    "body": [
+      "f.${1:grpChoices} = goforms.NewGroupBox(\"${2:Choices}\", ${3:300}, ${4:200})",
+      "f.${1:grpChoices}.SetBounds(${5:16}, ${6:16}, ${3:300}, ${4:200})",
+      "f.AddControl(f.${1:grpChoices})",
+      "",
+      "// Children are added to the container, not to the form: bounds inside a",
+      "// container are relative to it.",
+      "f.${7:chkOne} = goforms.NewCheckBox(\"${8:First}\")",
+      "f.${7:chkOne}.SetBounds(16, 32, 200, 26)",
+      "f.${1:grpChoices}.AddControl(f.${7:chkOne})$0"
+    ]
+  },
+  "Panel": {
+    "prefix": "gfpanel",
+    "description": "Panel",
+    "body": [
+      "f.${1:panel} = goforms.NewPanel(${2:300}, ${3:200})",
+      "f.${1:panel}.SetBounds(${4:16}, ${5:16}, ${2:300}, ${3:200})",
+      "f.${6:AddControl}(f.${1:panel})$0"
+    ]
+  },
+  "TabControl": {
+    "prefix": "gftabs",
+    "description": "TabControl with two pages",
+    "body": [
+      "f.${1:tabs} = goforms.NewTabControl(${2:400}, ${3:300})",
+      "f.${1:tabs}.SetBounds(${4:16}, ${5:16}, ${2:400}, ${3:300})",
+      "${6:general} := f.${1:tabs}.AddTab(\"${7:General}\")",
+      "f.${1:tabs}.AddTab(\"${8:About}\")",
+      "f.AddControl(f.${1:tabs})",
+      "",
+      "// A page is a container like any other.",
+      "f.${9:lblOnTab} = goforms.NewLabel(\"${10:On the first page}\")",
+      "f.${9:lblOnTab}.SetBounds(16, 16, 240, 24)",
+      "${6:general}.AddControl(f.${9:lblOnTab})$0"
+    ]
+  },
+  "Anchor": {
+    "prefix": "gfanchor",
+    "description": "Anchor a control so it survives a resize",
+    "body": "f.${1:txtName}.SetAnchor(goforms.AnchorTop | goforms.AnchorLeft | goforms.${2|AnchorRight,AnchorBottom|})$0"
+  },
+  "Dock": {
+    "prefix": "gfdock",
+    "description": "Dock a control to an edge",
+    "body": "f.${1:panel}.SetDock(goforms.${2|DockTop,DockBottom,DockLeft,DockRight,DockFill|})$0"
+  },
+  "MessageBox": {
+    "prefix": "gfmsgbox",
+    "description": "A message box, which reports through a callback",
+    "body": [
+      "goforms.ShowMessageBox(f.Form,",
+      "\t\"${1:Apply these changes?}\", \"${2:Confirm}\",",
+      "\tgoforms.${3|MessageBoxYesNo,MessageBoxOK,MessageBoxOKCancel|}, goforms.${4|MessageBoxQuestion,MessageBoxInformation,MessageBoxWarning,MessageBoxError,MessageBoxNone|},",
+      "\tfunc(r goforms.DialogResult) {",
+      "\t\tif r == goforms.${5|DialogYes,DialogOK|} {",
+      "\t\t\t$0",
+      "\t\t}",
+      "\t})"
+    ]
+  },
+  "InputBox": {
+    "prefix": "gfinputbox",
+    "description": "Ask for one line of text",
+    "body": [
+      "goforms.ShowInputBox(f.Form, \"${1:Rename}\", \"${2:New name}\", func(text string, ok bool) {",
+      "\tif !ok {",
+      "\t\treturn",
+      "\t}",
+      "\t$0",
+      "})"
+    ]
+  },
+  "OpenFileDialog": {
+    "prefix": "gfopenfile",
+    "description": "Open a file and read it - works in a browser too",
+    "body": [
+      "dlg := goforms.NewOpenFileDialog()",
+      "dlg.Filter = goforms.FileDialogFilter{",
+      "\tDescription: \"${1:Text files}\",",
+      "\tExtensions:  []string{\"${2:.txt}\"},",
+      "}",
+      "dlg.Show(f.Form, func(path string, ok bool) {",
+      "\tif !ok {",
+      "\t\treturn",
+      "\t}",
+      "\t// ReadAll rather than os.Open: in a browser the file arrives as bytes",
+      "\t// with no path behind them.",
+      "\tdata, err := dlg.ReadAll()",
+      "\tif err != nil {",
+      "\t\treturn",
+      "\t}",
+      "\t$0",
+      "})"
+    ]
+  },
+  "SaveFileDialog": {
+    "prefix": "gfsavefile",
+    "description": "Ask where to save and write it",
+    "body": [
+      "dlg := goforms.NewSaveFileDialog()",
+      "dlg.DefaultFileName = \"${1:report.txt}\"",
+      "dlg.Show(f.Form, func(path string, ok bool) {",
+      "\tif !ok {",
+      "\t\treturn",
+      "\t}",
+      "\tif err := dlg.WriteAll([]byte(${2:body})); err != nil {",
+      "\t\treturn",
+      "\t}",
+      "\t$0",
+      "})"
+    ]
+  },
+  "Show a second form": {
+    "prefix": "gfshow",
+    "description": "Open another form, modeless",
+    "body": [
+      "${1:settingsform}.New${2:SettingsForm}().Show()$0"
+    ]
+  },
+  "ShowDialog": {
+    "prefix": "gfshowdialog",
+    "description": "Open a form modally and read its result",
+    "body": [
+      "// ShowDialog blocks until the form closes, so it cannot run on the UI",
+      "// goroutine; fyne.Do hops back with the answer.",
+      "go func() {",
+      "\tdlg := ${1:aboutform}.New${2:AboutForm}()",
+      "\tif dlg.ShowDialog() == goforms.DialogOK {",
+      "\t\tfyne.Do(func() {",
+      "\t\t\t$0",
+      "\t\t})",
+      "\t}",
+      "}()"
+    ]
+  },
+  "Close with a result": {
+    "prefix": "gfclose",
+    "description": "Close a dialog, reporting what the user chose",
+    "body": "f.CloseWithResult(goforms.${1|DialogOK,DialogCancel,DialogYes,DialogNo|})$0"
+  },
+  "MenuStrip": {
+    "prefix": "gfmenu",
+    "description": "A menu bar with one menu and one item",
+    "body": [
+      "${1:open} := goforms.NewMenuItem(\"${2:Open...}\")",
+      "${1:open}.Click.Handle(f.${3:mnuOpen}_Click)",
+      "file := goforms.NewTopMenu(\"${4:File}\", ${1:open})",
+      "f.SetMainMenu(goforms.NewMenuStrip(file))$0"
+    ]
+  },
+  "ToolStrip": {
+    "prefix": "gftoolbar",
+    "description": "A toolbar docked to the top",
+    "body": [
+      "f.${1:toolStrip} = goforms.NewToolStrip()",
+      "f.${1:toolStrip}.SetBounds(0, 0, ${2:800}, 34)",
+      "f.${1:toolStrip}.SetAnchor(goforms.AnchorTop | goforms.AnchorLeft | goforms.AnchorRight)",
+      "f.${1:toolStrip}.AddButton(\"${3:New}\", f.${4:toolNew}_Click)",
+      "f.AddControl(f.${1:toolStrip})$0"
+    ]
+  },
+  "StatusStrip": {
+    "prefix": "gfstatusbar",
+    "description": "A status bar docked to the bottom",
+    "body": [
+      "f.${1:statusStrip} = goforms.NewStatusStrip(${2:800}, 26)",
+      "f.${1:statusStrip}.SetDock(goforms.DockBottom)",
+      "// A status bar is made of panels; the first one is the message area.",
+      "f.${3:statusText} = f.${1:statusStrip}.AddPanel(\"${4:Ready}\")",
+      "f.AddControl(f.${1:statusStrip})$0"
+    ]
+  },
+  "Context menu": {
+    "prefix": "gfcontextmenu",
+    "description": "A right-click menu on a control",
+    "body": [
+      "${1:del} := goforms.NewMenuItem(\"${2:Delete}\")",
+      "${1:del}.Click.Handle(func(sender any, e goforms.EventArgs) {",
+      "\t$0",
+      "})",
+      "f.${3:lstItems}.SetContextMenu(goforms.NewContextMenu(${1:del}))"
+    ]
+  },
+  "Timer": {
+    "prefix": "gftimer",
+    "description": "A repeating timer",
+    "body": [
+      "f.${1:timer} = goforms.NewTimer(${2:1000}) // milliseconds",
+      "f.${1:timer}.Tick.Handle(func(sender any, e goforms.EventArgs) {",
+      "\t$0",
+      "})",
+      "f.${1:timer}.Start()"
+    ]
+  },
+  "Theme": {
+    "prefix": "gftheme",
+    "description": "The theme literal a styles file holds",
+    "body": [
+      "// Theme is this application's look, applied in main.go before any form is",
+      "// created. Every field left out keeps the toolkit's default for that",
+      "// property, which is what lets a theme change one colour without",
+      "// restating the others.",
+      "func Theme() goforms.Theme {",
+      "\treturn goforms.Theme{",
+      "\t\tName:       \"${1:Dark}\",",
+      "\t\tDark:       ${2:true},",
+      "\t\tBackground: goforms.RGB(${3:0x1E}, ${4:0x1F}, ${5:0x22}),",
+      "\t\tForeground: goforms.RGB(${6:0xE6}, ${7:0xE7}, ${8:0xEA}),",
+      "\t\tPrimary:    goforms.RGB(${9:0x4C}, ${10:0x97}, ${11:0xFF}),",
+      "\t}",
+      "}$0"
+    ]
+  },
+  "Form Load handler": {
+    "prefix": "gfload",
+    "description": "The Load handler, where a form fills itself in",
+    "body": [
+      "// ${1:MainForm}_Load runs once, the first time the form is shown.",
+      "func (f *${1:MainForm}) ${1:MainForm}_Load(sender any, e goforms.EventArgs) {",
+      "\t$0",
+      "}"
+    ]
+  },
+  "Closing handler": {
+    "prefix": "gfclosing",
+    "description": "Closing, which can cancel the close",
+    "body": [
+      "f.Closing.Handle(func(sender any, e *goforms.CancelEventArgs) {",
+      "\tif ${1:unsaved} {",
+      "\t\te.Cancel = true",
+      "\t}",
+      "\t$0",
+      "})"
+    ]
+  }
+}

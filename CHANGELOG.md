@@ -1,5 +1,78 @@
 # Changelog
 
+## 0.11.0
+
+0.10.0 gave the extension the ability to build for three targets. This release
+is about the gaps that left: a build with no run, a theme you could only
+choose at creation time, a first window with nothing in it, and the typing the
+canvas was never going to cover.
+
+### Run, not just build
+
+**GoForms: Run in Browser (WebAssembly)** compiles, serves and opens, in one
+command. The desktop has had a single Run since the beginning; a browser build
+had a Build and a Serve and it was on you to remember they went together - and
+to remember why, since a `.wasm` opened from the disk fails in a way that
+looks like a broken build rather than a browser rule.
+
+**GoForms: Run…** asks which of the three targets and then does the whole
+thing, and it is on the status bar, on the left, whenever the window holds a
+Go module. **GoForms: Stop the WebAssembly Server** closes the local server
+without closing the window; it reports how many were running, because a
+command that says it stopped something when it did not is worse than no
+command.
+
+### A first window that says what to do
+
+An empty VS Code window used to say nothing about this extension. The
+Explorer's welcome screen now has a **Create GoForms Project** button - in an
+empty window, and in a folder with no Go module in it - and there is a
+four-step walkthrough under Help → Get Started covering the project layout,
+the designer, the two halves of a form, and the build targets. Its pages are
+markdown that ships with the extension, so they open with no connection.
+
+### A theme after the fact
+
+The project wizard asks how the app should look, and a project that answered
+"the default" had no way back: the theme editor edits `<name>-styles.go`, and
+there was nothing to open. **GoForms: New Theme…** - on a folder's right-click
+menu in the Explorer, beside New Form - writes that file from the same
+starting points the wizard offers, and adds the `SetTheme` call to `main()`.
+Without that call the file is written and ignored, which is worse than not
+having it; if `main.go` is not shaped the way the templates write it, the
+command says so rather than guessing at an edit.
+
+### Snippets
+
+35 of them, all prefixed `gf`. A form and its `main()`, a handler with the
+right `EventArgs` type and the `.Handle(…)` that connects it, one per control,
+the containers, the dialogs, the menu, toolbar, status bar and context menu, a
+timer, and the two form events. Each control snippet writes all three lines a
+control needs - construct, place, add - because a control that is constructed
+and never added is the mistake that produces a form with nothing on it.
+
+### F7 and Shift+F7
+
+A form is two files whose names differ by eleven characters. Visual Studio
+binds F7 to the code and Shift+F7 to the designer, and people who have used it
+reach for those keys without thinking. Now they work. F7 on a form whose code
+file was never written writes it, rather than reporting a file the user never
+chose not to have.
+
+### Offline, checked rather than assumed
+
+The claim that this works with no connection is now a test. Nothing under
+`src/`, `media/`, `templates/`, `snippets/` or `docs/` may name a remote URL;
+both webviews must keep `default-src 'none'` and be confined to `media/`; the
+helper CLI compiled on first activation must stay standard-library-only, so
+building it is never a module download; the setup guides must stay packaged;
+and the WebAssembly loader page must reference nothing it is not given. A
+second test does the same for the manifest - every menu, keybinding,
+walkthrough step and welcome button must name a command that exists and is
+registered, and the README must list exactly the snippets and commands that
+are really there. Those strings are checked by nothing at runtime: a menu
+entry for a command that does not exist simply does nothing when clicked.
+
 ## 0.10.2
 
 A test fix, and the release the previous tag did not produce.

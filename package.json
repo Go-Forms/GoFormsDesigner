@@ -2,7 +2,7 @@
   "name": "goforms-designer",
   "displayName": "GoForms Designer",
   "description": "Visual WinForms-style designer for GoForms: drag-and-drop editing of *-designer.go files, plus project/form scaffolding commands.",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "publisher": "goforms",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -39,7 +39,9 @@
     "Other"
   ],
   "activationEvents": [
-    "onLanguage:go"
+    "onLanguage:go",
+    "workspaceContains:go.mod",
+    "workspaceContains:**/*-designer.go"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -74,6 +76,11 @@
       {
         "command": "goforms.newForm",
         "title": "GoForms: New Form...",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.newTheme",
+        "title": "GoForms: New Theme...",
         "category": "GoForms"
       },
       {
@@ -144,6 +151,17 @@
         "category": "GoForms"
       },
       {
+        "command": "goforms.runWasm",
+        "title": "GoForms: Run in Browser (WebAssembly)",
+        "category": "GoForms",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "goforms.stopServing",
+        "title": "GoForms: Stop the WebAssembly Server",
+        "category": "GoForms"
+      },
+      {
         "command": "goforms.buildAndroid",
         "title": "GoForms: Build for Android (APK)",
         "category": "GoForms"
@@ -167,6 +185,24 @@
         "command": "goforms.openSetupGuide",
         "title": "GoForms: Open Setup Guide (Android NDK, fyne CLI, WebAssembly)",
         "category": "GoForms"
+      },
+      {
+        "command": "goforms.run",
+        "title": "GoForms: Run...",
+        "category": "GoForms",
+        "icon": "$(play)"
+      },
+      {
+        "command": "goforms.viewCode",
+        "title": "GoForms: View Code",
+        "category": "GoForms",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "goforms.viewDesigner",
+        "title": "GoForms: View Designer",
+        "category": "GoForms",
+        "icon": "$(layout)"
       }
     ],
     "menus": {
@@ -177,14 +213,19 @@
           "group": "goforms@1"
         },
         {
+          "command": "goforms.newTheme",
+          "when": "explorerResourceIsFolder",
+          "group": "goforms@2"
+        },
+        {
           "command": "goforms.build",
           "when": "resourceFilename == go.mod",
-          "group": "goforms@2"
+          "group": "goforms@3"
         },
         {
           "command": "goforms.runDesktop",
           "when": "resourceFilename == go.mod",
-          "group": "goforms@3"
+          "group": "goforms@4"
         }
       ],
       "commandPalette": [
@@ -248,6 +289,26 @@
         },
         {
           "command": "goforms.openSetupGuide"
+        },
+        {
+          "command": "goforms.newTheme"
+        },
+        {
+          "command": "goforms.runWasm"
+        },
+        {
+          "command": "goforms.stopServing"
+        },
+        {
+          "command": "goforms.run"
+        },
+        {
+          "command": "goforms.viewCode",
+          "when": "resourceLangId == go"
+        },
+        {
+          "command": "goforms.viewDesigner",
+          "when": "resourceLangId == go"
         }
       ],
       "editor/title": [
@@ -264,7 +325,7 @@
         {
           "command": "goforms.tidyDesignerFile",
           "when": "resourceFilename =~ /-designer\\.go$/",
-          "group": "navigation@3"
+          "group": "navigation@4"
         },
         {
           "command": "goforms.openAsText",
@@ -283,6 +344,11 @@
         },
         {
           "command": "goforms.build",
+          "when": "activeCustomEditorId == 'goforms.designer'",
+          "group": "navigation@3"
+        },
+        {
+          "command": "goforms.runWasm",
           "when": "activeCustomEditorId == 'goforms.designer'",
           "group": "navigation@2"
         }
@@ -336,7 +402,94 @@
           "markdownDescription": "Run builds with `GOPROXY=off`, so a module missing from the local cache fails immediately by name rather than waiting on a download. Builds never need the network as long as `go mod download` has run once; turn this on to have that verified rather than assumed."
         }
       }
-    }
+    },
+    "snippets": [
+      {
+        "language": "go",
+        "path": "./snippets/goforms.json"
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "workbench.explorer.emptyView",
+        "contents": "Start a GoForms application - a Windows Forms-style GUI in plain Go.\n[Create GoForms Project](command:goforms.createProject)\nOr open a folder that already has one."
+      },
+      {
+        "view": "workbench.explorer.fileView",
+        "contents": "This folder has no Go module yet.\n[Create GoForms Project](command:goforms.createProject)",
+        "when": "workbenchState == folder && !goforms.hasProject"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "goforms.viewCode",
+        "key": "f7",
+        "when": "activeCustomEditorId == 'goforms.designer' || resourceFilename =~ /-designer\\.go$/"
+      },
+      {
+        "command": "goforms.viewDesigner",
+        "key": "shift+f7",
+        "when": "resourceLangId == go && resourceFilename =~ /\\.go$/"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "goforms.getStarted",
+        "title": "Get Started with GoForms",
+        "description": "A Windows Forms-style designer for Go: drag controls onto a form, and the layout is written as ordinary Go source.",
+        "steps": [
+          {
+            "id": "createProject",
+            "title": "Create a project",
+            "description": "A GoForms project is a normal Go module with a form in it.\n[Create GoForms Project](command:goforms.createProject)",
+            "media": {
+              "markdown": "docs/walkthrough/create-project.md",
+              "altText": "The layout of a new GoForms project"
+            },
+            "completionEvents": [
+              "onCommand:goforms.createProject"
+            ]
+          },
+          {
+            "id": "designForm",
+            "title": "Design the form",
+            "description": "Open a `*-designer.go` file to get the visual designer. Drag controls from the toolbox; the Go source is written as you go.",
+            "media": {
+              "markdown": "docs/walkthrough/design-form.md",
+              "altText": "What the designer writes into initializeComponent"
+            },
+            "completionEvents": [
+              "onCommand:goforms.openDesigner"
+            ]
+          },
+          {
+            "id": "codeBehind",
+            "title": "Write the handlers",
+            "description": "Layout and logic live in two files. F7 and Shift+F7 move between them, and the `gf` snippets cover the controls and dialogs.",
+            "media": {
+              "markdown": "docs/walkthrough/code-behind.md",
+              "altText": "The code-behind half of a form"
+            },
+            "completionEvents": [
+              "onCommand:goforms.viewCode"
+            ]
+          },
+          {
+            "id": "run",
+            "title": "Run it",
+            "description": "The same project builds for the desktop, the browser and Android.\n[Run](command:goforms.run)\nOr check what is installed first: [Check Setup](command:goforms.checkSetup)",
+            "media": {
+              "markdown": "docs/walkthrough/run.md",
+              "altText": "The three build targets and what each one needs"
+            },
+            "completionEvents": [
+              "onCommand:goforms.run",
+              "onCommand:goforms.runDesktop"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run build",

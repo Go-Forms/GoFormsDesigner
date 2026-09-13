@@ -91,10 +91,17 @@ export function serveDirectory(dir: string): Promise<string> {
 	});
 }
 
-/** Stops every server, for deactivation. */
-export function stopAllServers(): void {
+/** Stops every server, for deactivation or on request, and reports how many
+ * were running - a server nobody asked to stop should not claim it stopped
+ * one. */
+export function stopAllServers(): number {
+	let stopped = 0;
 	for (const { server } of servers.values()) {
+		if (server.listening) {
+			stopped++;
+		}
 		server.close();
 	}
 	servers.clear();
+	return stopped;
 }

@@ -19,7 +19,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { findGo, GoNotFoundError } from './goTool';
 import { findAdb, findFyne, findNdk, findWasmExec, looksLikeNdk, ToolNotFoundError } from './tools';
-import { serveDirectory } from './serve';
+import { serveDirectory, stopAllServers } from './serve';
 
 export type Target = 'desktop' | 'wasm' | 'android';
 
@@ -321,7 +321,13 @@ export async function runDesktop(project: Project): Promise<boolean> {
 /** Builds the WebAssembly bundle into build/wasm/: the .wasm, Go's own
  * wasm_exec.js, and a loader page. The page comes from the project's wasm/
  * folder when it has one (a new project does), else from the extension. */
-export async function buildWasm(context: vscode.ExtensionContext, project: Project): Promise<boolean> {
+export async function buildWasm(
+	context: vscode.ExtensionContext,
+	project: Project,
+	// thenServe: offer to open the result. Off when the caller is about to
+	// open it anyway, so a run does not ask a question it has answered.
+	options: { thenServe?: boolean } = {},
+): Promise<boolean> {
 	const { go } = findGo();
 	const outDir = buildDir(project, 'wasm');
 	const wasmName = `${project.name}.wasm`;
@@ -385,7 +391,7 @@ export async function buildWasm(context: vscode.ExtensionContext, project: Proje
 		},
 	]);
 
-	if (ok) {
+	if (ok && options.thenServe !== false) {
 		const choice = await vscode.window.showInformationMessage(
 			`WebAssembly build of ${project.name} is in build/wasm. A page loaded from disk cannot run it - browsers refuse .wasm over file:// - so it needs a server.`,
 			'Serve and open in browser'
@@ -395,6 +401,17 @@ export async function buildWasm(context: vscode.ExtensionContext, project: Proje
 		}
 	}
 	return ok;
+}
+
+/** Builds for the browser and opens the result, which is what "run" means
+ * for a target that cannot be launched as a process. The desktop has had a
+ * single Run since the beginning; this is the same thing one platform over. */
+export async function runWasm(context: vscode.ExtensionContext, project: Project): Promise<boolean> {
+	if (!(await buildWasm(context, project, { thenServe: false }))) {
+		return false;
+	}
+	await serveWasm(context, project);
+	return true;
 }
 
 /** Serves build/wasm on a local port and opens it. Offline by nature: it is
@@ -658,6 +675,15 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('goforms.runDesktop', withProject((p) => runDesktop(p))),
 		vscode.commands.registerCommand('goforms.buildWasm', withProject((p) => buildWasm(context, p))),
 		vscode.commands.registerCommand('goforms.serveWasm', withProject((p) => serveWasm(context, p))),
+		vscode.commands.registerCommand('goforms.runWasm', withProject((p) => runWasm(context, p))),
+		vscode.commands.registerCommand('goforms.stopServing', () => {
+			const stopped = stopAllServers();
+			vscode.window.showInformationMessage(
+				stopped === 0
+					? 'GoForms: no WebAssembly server is running.'
+					: `GoForms: stopped ${stopped === 1 ? 'the server' : `${stopped} servers`}.`
+			);
+		}),
 		vscode.commands.registerCommand('goforms.buildAndroid', withProject((p) => buildAndroid(context, p))),
 		vscode.commands.registerCommand('goforms.installAndroid', withProject((p) => installAndroid(context, p))),
 		vscode.commands.registerCommand('goforms.setAndroidNdkPath', () => setNdkPath()),
