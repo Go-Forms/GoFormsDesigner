@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.1
+
+The listing, which 0.10.0 left half-written. The README had been rewritten for
+the Marketplace page and lost the command list on the way out - the one thing
+a reader cannot work out from prose, since there are nineteen commands and no
+way to guess which exist.
+
+It now carries a table of every command with a line each, a short section of
+the things the UI does not announce (Escape selects the form; renaming a
+control renames its handlers too; the designer keeps its own undo history
+because it writes the file directly rather than through the editor's
+document), and three screenshots: the canvas with a control selected and its
+properties and events beside it, the toolbox, and the theme editor.
+
+No change to the extension itself.
+
 ## 0.10.0
 
 ### Building the project, from the editor

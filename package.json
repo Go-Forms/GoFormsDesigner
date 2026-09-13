@@ -2,7 +2,7 @@
   "name": "goforms-designer",
   "displayName": "GoForms Designer",
   "description": "Visual WinForms-style designer for GoForms: drag-and-drop editing of *-designer.go files, plus project/form scaffolding commands.",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "publisher": "goforms",
   "license": "MIT",
   "icon": "media/icon.png",
