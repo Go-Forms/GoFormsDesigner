@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.2
+
+A test fix, and the release the previous tag did not produce.
+
+The tests for the toolchain search passed on the machine they were written on
+and failed on Windows CI: they cleared the Android environment variables and
+the home directory, but not the two fixed locations the search also covers -
+the drive root and `Program Files (x86)`. A runner with an Android SDK
+installed in one of those found it instead of the tree the test had built,
+which is exactly the kind of machine-dependent result the tests exist to rule
+out. The sandbox now points both at itself, and the one test that cannot
+control what is on the machine - "nothing to find" - asserts on where the
+search looked rather than on it failing.
+
+No change to the extension itself.
+
 ## 0.10.1
 
 The listing, which 0.10.0 left half-written. The README had been rewritten for
