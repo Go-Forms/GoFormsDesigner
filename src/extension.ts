@@ -14,6 +14,7 @@ export const GOFORMS_MODULE = 'github.com/Go-Forms/GoForms';
 
 import {
 	computeReplacePath,
+	projectTemplates,
 	themeChoices,
 	themeTokens,
 	copyTemplateDir,
@@ -22,6 +23,9 @@ import {
 	validateGoIdentifier,
 	validateModuleName,
 } from './scaffold';
+import { registerBuildCommands } from './build';
+import { stopAllServers } from './serve';
+import { describeTools } from './tools';
 
 export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
@@ -32,14 +36,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('goforms.checkSetup', () => checkSetup(context))
 	);
 
+	registerBuildCommands(context);
 	registerDesignerEditorIfAvailable(context);
 	registerThemeEditor(context);
 }
 
 export function deactivate(): void {
-	// Nothing to clean up: commands are disposed via context.subscriptions,
-	// and the bundled Go CLI is a short-lived child process per invocation
-	// (see goTool.ts), not a long-running one.
+	// Commands are disposed via context.subscriptions and the bundled Go CLI
+	// is a short-lived child process per invocation (see goTool.ts). The one
+	// long-lived thing is the local server for a WebAssembly build.
+	stopAllServers();
 }
 
 /** Registers the custom editor provider, tolerating its absence.
@@ -85,13 +91,10 @@ function registerThemeEditor(context: vscode.ExtensionContext): void {
 // ---------------------------------------------------------------------------
 
 async function createProject(context: vscode.ExtensionContext): Promise<void> {
-	const kindPick = await vscode.window.showQuickPick(
-		[
-			{ label: 'Empty project', description: 'Minimal GoForms app with a single blank form', template: 'empty' as const },
-			{ label: 'Example project', description: 'Sample forms + most of the control catalog wired up', template: 'example' as const },
-		],
-		{ title: 'GoForms: Create New Project', placeHolder: 'Choose a project template' }
-	);
+	const kindPick = await vscode.window.showQuickPick(projectTemplates, {
+		title: 'GoForms: Create New Project',
+		placeHolder: 'Choose a project template',
+	});
 	if (!kindPick) {
 		return;
 	}
@@ -170,11 +173,17 @@ async function createProject(context: vscode.ExtensionContext): Promise<void> {
 	const templateDir = path.join(context.extensionPath, 'templates', kindPick.template);
 	const tokens = {
 		MODULE: projectName,
+		APP_ID: `com.example.${projectName.replace(/[^A-Za-z0-9_]/g, '_')}`,
+		APP_NAME: projectName,
 		REPLACE_BLOCK: replaceBlock,
 		...themeTokens(themePick),
 	};
 
 	try {
+		// Every project gets the files a build for the web or Android needs
+		// (FyneApp.toml, an icon, the loader page, the editor's tasks) before
+		// the template's own files, so a template may override any of them.
+		await copyTemplateDir(path.join(context.extensionPath, 'templates', 'common'), projectRoot, tokens);
 		await copyTemplateDir(templateDir, projectRoot, tokens);
 		if (themePick.styles) {
 			// The styles file is generated rather than living in each
@@ -401,6 +410,19 @@ async function checkSetup(context: vscode.ExtensionContext): Promise<void> {
 
 	const framework = vscode.workspace.getConfiguration('goforms').get<string>('frameworkPath');
 	lines.push(`Framework path: ${framework?.trim() || '(not set - will be asked for, or auto-detected)'}`);
+
+	// The build targets. Only Go is needed for the desktop and the browser;
+	// Android adds the fyne CLI and an NDK, and adb to install the result.
+	lines.push('');
+	lines.push('Build targets:');
+	lines.push('  Desktop: needs only Go');
+	lines.push('  WebAssembly: needs only Go (wasm_exec.js below comes with it)');
+	lines.push('  Android: needs the fyne CLI and the Android NDK; adb to install');
+	for (const line of describeTools()) {
+		lines.push('  ' + line);
+	}
+	lines.push('');
+	lines.push('Missing something? Run "GoForms: Open Setup Guide" - the guides are bundled and work offline.');
 
 	const channel = vscode.window.createOutputChannel('GoForms');
 	context.subscriptions.push(channel);

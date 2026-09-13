@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.10.0
+
+### Building the project, from the editor
+
+The designer could write a GoForms app but not produce one. Running it meant
+leaving for a terminal, and the two targets that are not the desktop meant
+knowing the incantations: which environment variables `GOOS=js` needs, that a
+`.wasm` will not load over `file://`, that Android is the fyne CLI plus an NDK
+and an app id.
+
+**`GoForms: Build...`** now asks for a target and builds it:
+
+| Target | What runs | Output |
+| --- | --- | --- |
+| Desktop | `go build` | `build/desktop/` |
+| WebAssembly | `go build` with `GOOS=js GOARCH=wasm`, plus `wasm_exec.js` from the Go installation and the loader page | `build/wasm/` |
+| Android | `fyne package --os android/arm64` | `build/android/*.apk` |
+
+Each is a command of its own as well, and `GoForms: Run on Desktop` sits on
+the designer's toolbar beside the build button. Every step is a plain process
+in a terminal panel - the same commands the generated project's
+`.vscode/tasks.json` runs - so a failure is the compiler's own message with a
+clickable `file:line`, and nothing happens that cannot be repeated by hand.
+
+**`GoForms: Serve WebAssembly Build in Browser`** puts the build on a local
+port and opens it. A browser refuses a `.wasm` over `file://`, so a build you
+cannot serve is a build you cannot run; the server binds the loopback
+interface only, sends `application/wasm` (without which
+`instantiateStreaming` rejects the file), and sends no-cache, so a rebuild
+shows up on reload.
+
+**Android** needs two things Go does not bring: the fyne CLI and the NDK.
+Neither is downloaded for you - an editor installing a toolchain is not
+something to be trusted with - but both are looked for everywhere they are
+normally put, and when one is missing the message says where it looked and
+offers the guide that says where to put it. The guides ship inside the
+extension, in English and Russian, because "the NDK is missing" is not a
+moment to need a working search engine.
+
+- **`GoForms: Open Setup Guide`**, **`GoForms: Set Android NDK Path...`**,
+  **`GoForms: Set fyne CLI Path...`**, **`GoForms: Install APK on Connected
+  Device (adb)`**.
+- `goforms.android.target` picks the architecture (arm64 by default; `android`
+  builds all four into one APK).
+- `goforms.build.offline` runs builds with `GOPROXY=off`, so a module missing
+  from the module cache fails immediately by name instead of waiting on a
+  download. No build needs the network otherwise.
+
+### Project templates for the browser and for Android
+
+`Create New Project` has two more templates - **web** and **android** - whose
+`README` and starting form are written for a target that is a page or a phone
+rather than a window. Every template now also carries `.vscode/tasks.json`
+with the four build tasks, and a `.gitignore` for `build/`, so a project does
+not have its own build output offered for commit the first time it is built.
+
+### Fixes
+
+- A designer edit no longer leaves the file unformatted. `apply` spliced text
+  and wrote it as-is, so every control dropped on the canvas moved
+  `-designer.go` further out of gofmt form (struct field alignment), and the
+  next `gofmt` run showed a whole-file diff. The file is formatted after the
+  batch, and left untouched if the result would not parse.
+- An Android SDK installed somewhere other than the default is found. The NDK
+  and adb were looked for under `ANDROID_HOME`, `%LOCALAPPDATA%\Android\Sdk`
+  and `~/Android/Sdk` only - but Android Studio asks where to put the SDK, and
+  `C:\Android\Sdk` is a common answer, which left both tools reported missing
+  on a machine that had them. `C:\Android\Sdk`, `/opt/android-sdk`,
+  `/usr/lib/android-sdk` and the old `Program Files (x86)\Android\android-sdk`
+  are searched too.
+
 ## 0.9.0
 
 ### A theme editor

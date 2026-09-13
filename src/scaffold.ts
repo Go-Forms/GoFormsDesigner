@@ -18,6 +18,10 @@ import * as vscode from 'vscode';
  * cannot omit a line it has already written. */
 export interface TemplateTokens {
 	MODULE: string;
+	/** Reverse-DNS application id, for FyneApp.toml and the Android package. */
+	APP_ID: string;
+	/** The name shown on a launcher or a browser tab. */
+	APP_NAME: string;
 	REPLACE_BLOCK: string;
 	/** The line main() calls to apply a theme, or empty for the default look. */
 	THEME_CALL: string;
@@ -26,12 +30,39 @@ export interface TemplateTokens {
 }
 
 function substitute(content: string, tokens: TemplateTokens): string {
-	return content
-		.split('{{MODULE}}').join(tokens.MODULE)
-		.split('{{REPLACE_BLOCK}}').join(tokens.REPLACE_BLOCK)
-		.split('{{THEME_CALL}}').join(tokens.THEME_CALL)
-		.split('{{THEME_BODY}}').join(tokens.THEME_BODY);
+	let out = content;
+	for (const [key, value] of Object.entries(tokens)) {
+		out = out.split(`{{${key}}}`).join(value);
+	}
+	return out;
 }
+
+/** One entry of the Create New Project picker. `template` names a folder
+ * under templates/; templates/common is copied under every one of them. */
+export interface ProjectTemplate extends vscode.QuickPickItem {
+	template: 'empty' | 'example' | 'android' | 'web';
+}
+
+export const projectTemplates: ProjectTemplate[] = [
+	{ label: 'Empty project', description: 'Minimal GoForms app with a single blank form', template: 'empty' },
+	{ label: 'Example project', description: 'Sample forms + most of the control catalog wired up', template: 'example' },
+	{
+		label: 'Android app',
+		description: 'A phone-sized main form, FyneApp.toml and the Android build task ready',
+		detail: 'Builds with GoForms: Build for Android (needs the fyne CLI and the NDK - the setup guide is bundled).',
+		template: 'android',
+	},
+	{
+		label: 'Web app (WebAssembly)',
+		description: 'A main form that fills the browser tab, with the loader page in wasm/',
+		detail: 'Builds with GoForms: Build for WebAssembly; only Go is needed.',
+		template: 'web',
+	},
+];
+
+/** Template files that are copied byte for byte rather than substituted. */
+const binaryExtensions = new Set(['.png', '.ico', '.jpg', '.jpeg', '.gif', '.woff', '.woff2', '.ttf']);
+
 
 /** One of the looks offered when a project is created.
  *
@@ -117,8 +148,8 @@ export function themeTokens(choice: ThemeChoice): Pick<TemplateTokens, 'THEME_CA
  * file is called `{{MODULE}}-styles.go`, so the name carries a token like the
  * content does.
  *
- * All template files are plain text (Go source, go.mod, README.md), so
- * reading everything as utf8 is safe. */
+ * Template files are plain text (Go source, go.mod, README.md) except the
+ * icon and the like, which are copied as they are. */
 export async function copyTemplateDir(srcDir: string, destDir: string, tokens: TemplateTokens): Promise<void> {
 	await fs.mkdir(destDir, { recursive: true });
 	const entries = await fs.readdir(srcDir, { withFileTypes: true });
@@ -127,6 +158,8 @@ export async function copyTemplateDir(srcDir: string, destDir: string, tokens: T
 		const destPath = path.join(destDir, substitute(entry.name, tokens));
 		if (entry.isDirectory()) {
 			await copyTemplateDir(srcPath, destPath, tokens);
+		} else if (binaryExtensions.has(path.extname(entry.name).toLowerCase())) {
+			await fs.copyFile(srcPath, destPath);
 		} else {
 			const content = await fs.readFile(srcPath, 'utf8');
 			await fs.writeFile(destPath, substitute(content, tokens), 'utf8');

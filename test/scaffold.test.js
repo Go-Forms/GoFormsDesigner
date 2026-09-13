@@ -19,6 +19,8 @@ const templates = path.join(root, 'templates');
 function tokensFor(project, theme) {
 	return {
 		MODULE: project,
+		APP_ID: `com.example.${project}`,
+		APP_NAME: project,
 		REPLACE_BLOCK: '',
 		THEME_CALL: theme ? '\tgoforms.SetTheme(Theme())\n' : '',
 		THEME_BODY: theme ? '\t\tName:            "Dark",\n\t\tDark:            true,\n' : '',
@@ -28,6 +30,13 @@ function tokensFor(project, theme) {
 const substitute = (text, tokens) =>
 	Object.entries(tokens).reduce((acc, [k, v]) => acc.split(`{{${k}}}`).join(v), text);
 
+/** Files copied byte for byte by copyTemplateDir; they hold no tokens. */
+const isBinary = (name) => /\.(png|ico|jpe?g|gif|woff2?|ttf)$/i.test(name);
+
+/** Tokens filled in by a build, not by the scaffold: the WebAssembly page
+ * keeps {{WASM_FILE}} until "Build for WebAssembly" knows the file name. */
+const buildTimeTokens = new Set(['WASM_FILE']);
+
 /** render copies a template directory the way copyTemplateDir does, into a
  * plain object of path -> contents. */
 function render(dir, tokens, into = {}, prefix = '') {
@@ -36,6 +45,8 @@ function render(dir, tokens, into = {}, prefix = '') {
 		const full = path.join(dir, entry.name);
 		if (entry.isDirectory()) {
 			render(full, tokens, into, path.posix.join(prefix, name));
+		} else if (isBinary(entry.name)) {
+			into[path.posix.join(prefix, name)] = '<binary>';
 		} else {
 			into[path.posix.join(prefix, name)] = substitute(fs.readFileSync(full, 'utf8'), tokens);
 		}
@@ -45,12 +56,21 @@ function render(dir, tokens, into = {}, prefix = '') {
 
 const noTokensLeft = (files) => {
 	for (const [name, body] of Object.entries(files)) {
-		assert.ok(!/\{\{[A-Z_]+\}\}/.test(body), `${name} still has an unsubstituted token`);
+		for (const m of body.matchAll(/\{\{([A-Z_]+)\}\}/g)) {
+			assert.ok(buildTimeTokens.has(m[1]), `${name} still has an unsubstituted token {{${m[1]}}}`);
+		}
 		assert.ok(!/\{\{[A-Z_]+\}\}/.test(name), `the file name ${name} still has a token`);
 	}
 };
 
-for (const template of ['empty', 'example']) {
+// Every project is templates/common plus one of these.
+const projectTemplates = ['empty', 'example', 'android', 'web'];
+
+test('the common template substitutes every token', () => {
+	noTokensLeft(render(path.join(templates, 'common'), tokensFor('myapp', true)));
+});
+
+for (const template of projectTemplates) {
 	test(`the ${template} template substitutes every token`, () => {
 		noTokensLeft(render(path.join(templates, template), tokensFor('myapp', true)));
 	});
@@ -99,19 +119,46 @@ test('an empty theme body still leaves a valid literal', () => {
 test('every token used by a template is one the extension supplies', () => {
 	// Catches a template that starts using a marker nothing fills in, which
 	// would ship as literal {{BRACES}} in someone's new project.
-	const known = new Set(['MODULE', 'REPLACE_BLOCK', 'THEME_CALL', 'THEME_BODY']);
+	const known = new Set(['MODULE', 'APP_ID', 'APP_NAME', 'REPLACE_BLOCK', 'THEME_CALL', 'THEME_BODY', ...buildTimeTokens]);
 	const seen = new Set();
 	const walk = (dir) => {
 		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
 			const full = path.join(dir, entry.name);
 			for (const m of entry.name.matchAll(/\{\{([A-Z_]+)\}\}/g)) seen.add(m[1]);
 			if (entry.isDirectory()) walk(full);
-			else for (const m of fs.readFileSync(full, 'utf8').matchAll(/\{\{([A-Z_]+)\}\}/g)) seen.add(m[1]);
+			else if (!isBinary(entry.name)) for (const m of fs.readFileSync(full, 'utf8').matchAll(/\{\{([A-Z_]+)\}\}/g)) seen.add(m[1]);
 		}
 	};
 	walk(templates);
 
 	for (const token of seen) {
 		assert.ok(known.has(token), `templates use {{${token}}}, which nothing substitutes`);
+	}
+});
+
+test('every project gets the files a web or Android build needs', () => {
+	const common = render(path.join(templates, 'common'), tokensFor('myapp', false));
+	assert.ok('FyneApp.toml' in common, 'FyneApp.toml names the app for fyne package');
+	assert.match(common['FyneApp.toml'], /ID = "com\.example\.myapp"/);
+	assert.match(common['FyneApp.toml'], /Icon = "Icon\.png"/);
+	assert.ok('Icon.png' in common, 'an Android app must have a launcher icon');
+	assert.ok('wasm/index.html' in common, 'the WebAssembly page');
+	assert.match(common['wasm/index.html'], /\{\{WASM_FILE\}\}/, 'the page waits for the build to name the .wasm');
+	assert.match(common['wasm/index.html'], /wasm_exec\.js/);
+	assert.match(common['wasm/index.html'], /dummyEntry/, 'Fyne raises the phone keyboard through this input');
+	assert.ok('.vscode/tasks.json' in common, 'the builds as editor tasks');
+	assert.match(common['.vscode/tasks.json'], /myapp\.wasm/);
+});
+
+test('the android and web templates share one main form at two sizes', () => {
+	const android = render(path.join(templates, 'android'), tokensFor('myapp', false));
+	const web = render(path.join(templates, 'web'), tokensFor('myapp', false));
+	assert.match(android['Forms/MainForm/MainForm-designer.go'], /NewForm\("myapp", 360, 640\)/, 'a phone in portrait');
+	assert.match(web['Forms/MainForm/MainForm-designer.go'], /NewForm\("myapp", 960, 600\)/, 'a browser tab');
+	for (const files of [android, web]) {
+		const designer = files['Forms/MainForm/MainForm-designer.go'];
+		assert.match(designer, /SetDock\(goforms\.DockFill\)/, 'the list takes whatever is left');
+		assert.match(designer, /AnchorRight/, 'the input row stretches');
+		assert.match(files['main.go'], /NewApplication\("com\.example\.myapp"\)/, 'the app id matches FyneApp.toml');
 	}
 });

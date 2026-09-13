@@ -2,7 +2,7 @@
   "name": "goforms-designer",
   "displayName": "GoForms Designer",
   "description": "Visual WinForms-style designer for GoForms: drag-and-drop editing of *-designer.go files, plus project/form scaffolding commands.",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "publisher": "goforms",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -115,6 +115,58 @@
         "title": "GoForms: Open Theme as Text",
         "category": "GoForms",
         "icon": "$(code)"
+      },
+      {
+        "command": "goforms.build",
+        "title": "GoForms: Build...",
+        "category": "GoForms",
+        "icon": "$(package)"
+      },
+      {
+        "command": "goforms.buildDesktop",
+        "title": "GoForms: Build for Desktop",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.runDesktop",
+        "title": "GoForms: Run on Desktop",
+        "category": "GoForms",
+        "icon": "$(play)"
+      },
+      {
+        "command": "goforms.buildWasm",
+        "title": "GoForms: Build for WebAssembly",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.serveWasm",
+        "title": "GoForms: Serve WebAssembly Build in Browser",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.buildAndroid",
+        "title": "GoForms: Build for Android (APK)",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.installAndroid",
+        "title": "GoForms: Install APK on Connected Device (adb)",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.setAndroidNdkPath",
+        "title": "GoForms: Set Android NDK Path...",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.setFynePath",
+        "title": "GoForms: Set fyne CLI Path...",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.openSetupGuide",
+        "title": "GoForms: Open Setup Guide (Android NDK, fyne CLI, WebAssembly)",
+        "category": "GoForms"
       }
     ],
     "menus": {
@@ -123,6 +175,16 @@
           "command": "goforms.newForm",
           "when": "explorerResourceIsFolder",
           "group": "goforms@1"
+        },
+        {
+          "command": "goforms.build",
+          "when": "resourceFilename == go.mod",
+          "group": "goforms@2"
+        },
+        {
+          "command": "goforms.runDesktop",
+          "when": "resourceFilename == go.mod",
+          "group": "goforms@3"
         }
       ],
       "commandPalette": [
@@ -156,6 +218,36 @@
         {
           "command": "goforms.tidyDesignerFile",
           "when": "resourceFilename =~ /-designer\\.go$/"
+        },
+        {
+          "command": "goforms.build"
+        },
+        {
+          "command": "goforms.buildDesktop"
+        },
+        {
+          "command": "goforms.runDesktop"
+        },
+        {
+          "command": "goforms.buildWasm"
+        },
+        {
+          "command": "goforms.serveWasm"
+        },
+        {
+          "command": "goforms.buildAndroid"
+        },
+        {
+          "command": "goforms.installAndroid"
+        },
+        {
+          "command": "goforms.setAndroidNdkPath"
+        },
+        {
+          "command": "goforms.setFynePath"
+        },
+        {
+          "command": "goforms.openSetupGuide"
         }
       ],
       "editor/title": [
@@ -183,6 +275,16 @@
           "command": "goforms.openDesigner",
           "when": "resourceFilename =~ /-designer\\.go$/ && activeCustomEditorId != 'goforms.designer'",
           "group": "navigation"
+        },
+        {
+          "command": "goforms.runDesktop",
+          "when": "activeCustomEditorId == 'goforms.designer'",
+          "group": "navigation@1"
+        },
+        {
+          "command": "goforms.build",
+          "when": "activeCustomEditorId == 'goforms.designer'",
+          "group": "navigation@2"
         }
       ]
     },
@@ -198,6 +300,40 @@
           "type": "string",
           "default": "",
           "description": "Absolute path to a local GoForms checkout (the folder containing go.mod for the goforms module). Used as the `replace goforms => ...` target when scaffolding new projects. Leave empty to be prompted the first time it's needed."
+        },
+        "goforms.fynePath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Full path to the `fyne` command-line tool (`go install fyne.io/tools/cmd/fyne@latest` puts it in `$(go env GOPATH)/bin`). Needed only for Android builds. Leave empty to search `PATH` and the Go bin directory."
+        },
+        "goforms.androidNdkPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the Android NDK root (the folder containing `source.properties` and `toolchains/`). Leave empty to search `ANDROID_NDK_HOME`, `ANDROID_HOME/ndk/*`, `~/Android/android-ndk-*`, `C:\\\\android-ndk-*` and the other usual places. `GoForms: Open Setup Guide` explains where to put a downloaded NDK."
+        },
+        "goforms.android.target": {
+          "type": "string",
+          "default": "android/arm64",
+          "enum": [
+            "android/arm64",
+            "android/arm",
+            "android/amd64",
+            "android/386",
+            "android"
+          ],
+          "enumDescriptions": [
+            "64-bit ARM: every phone made since about 2015 - the fastest build and the smallest APK",
+            "32-bit ARM: old phones",
+            "x86-64: the Android emulator on a PC",
+            "x86: very old emulators",
+            "Every architecture in one APK - four times the size and the build time"
+          ],
+          "markdownDescription": "Which Android architecture `GoForms: Build for Android` packages. One APK per build; pick `android` for all four."
+        },
+        "goforms.build.offline": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Run builds with `GOPROXY=off`, so a module missing from the local cache fails immediately by name rather than waiting on a download. Builds never need the network as long as `go mod download` has run once; turn this on to have that verified rather than assumed."
         }
       }
     }

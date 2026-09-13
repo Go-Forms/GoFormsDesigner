@@ -1,0 +1,13 @@
+# FyneApp.toml names the application for the packagers: the fyne CLI reads
+# it when building an Android APK, and GoForms Designer reads it for the
+# WebAssembly page. Plain go build ignores it.
+#
+# ID must be reverse-DNS and unique per app - it is the Android package name,
+# and two apps with the same ID replace each other on a phone.
+
+[Details]
+Icon = "Icon.png"
+Name = "{{APP_NAME}}"
+ID = "{{APP_ID}}"
+Version = "0.1.0"
+Build = 1

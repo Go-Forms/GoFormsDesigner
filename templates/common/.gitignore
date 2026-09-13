@@ -1,0 +1,30 @@
+# Where "GoForms: Build..." puts its output. The desktop binary, the
+# WebAssembly bundle and the packaged .apk together run to hundreds of
+# megabytes, and every one of them is reproducible from the source beside
+# this file.
+/build/
+*.apk
+*.wasm
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.*
+
+# Go workspace files: they point at sibling checkouts, which are a property
+# of one machine's layout, not of this project.
+go.work
+go.work.sum
+
+# Editors / OS
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

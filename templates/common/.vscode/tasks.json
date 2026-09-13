@@ -1,0 +1,49 @@
+{
+	// Build tasks for this GoForms project. They are the same commands
+	// GoForms Designer runs from the command palette (GoForms: Build...),
+	// written out so they work from the terminal, from Ctrl+Shift+B, and
+	// on a machine without the extension.
+	//
+	// Every task runs offline once `go mod download` has been run once.
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "GoForms: run (desktop)",
+			"type": "shell",
+			"command": "go",
+			"args": ["run", "."],
+			"group": { "kind": "build", "isDefault": true },
+			"problemMatcher": ["$go"]
+		},
+		{
+			"label": "GoForms: build (desktop)",
+			"type": "shell",
+			"command": "go",
+			"args": ["build", "-o", "build/desktop/", "."],
+			"group": "build",
+			"problemMatcher": ["$go"]
+		},
+		{
+			// Compiles the .wasm only. "GoForms: Build for WebAssembly" in the
+			// command palette also copies wasm_exec.js from the Go installation
+			// and the page from wasm/ into build/wasm, then offers to serve it.
+			"label": "GoForms: compile (wasm)",
+			"type": "shell",
+			"command": "go",
+			"args": ["build", "-ldflags=-s -w", "-o", "build/wasm/{{MODULE}}.wasm", "."],
+			"options": { "env": { "GOOS": "js", "GOARCH": "wasm", "CGO_ENABLED": "0" } },
+			"group": "build",
+			"problemMatcher": ["$go"]
+		},
+		{
+			// Needs the fyne CLI on PATH and ANDROID_NDK_HOME set - see
+			// "GoForms: Open Setup Guide". The APK lands beside go.mod.
+			"label": "GoForms: package (android/arm64)",
+			"type": "shell",
+			"command": "fyne",
+			"args": ["package", "--os", "android/arm64"],
+			"group": "build",
+			"problemMatcher": ["$go"]
+		}
+	]
+}

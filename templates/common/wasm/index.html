@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<!--
+  The page that loads the WebAssembly build. GoForms Designer copies it
+  into build/wasm next to {{WASM_FILE}} and wasm_exec.js, substituting the
+  tokens; edit it freely - it is yours. It needs no network: nothing here
+  is fetched from anywhere but the folder it is in.
+-->
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+	<title>{{APP_NAME}}</title>
+	<link rel="icon" type="image/png" href="icon.png" />
+	<style>
+		html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1b1c1f; color: #e6e7ea; font: 15px system-ui, sans-serif; }
+		@media (prefers-color-scheme: light) { html, body { background: #f3f4f6; color: #1a1a1e; } }
+		canvas { display: block; }
+		#loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; }
+		#loading img { width: 96px; height: 96px; }
+		#loading .name { font-size: 20px; font-weight: 600; }
+		#loading .status { opacity: 0.7; }
+		#loading .error { color: #e5484d; max-width: 36em; }
+		.bar { width: 200px; height: 4px; border-radius: 2px; background: rgba(128,128,128,0.25); overflow: hidden; }
+		.bar::after { content: ""; display: block; width: 40%; height: 100%; background: #4c97ff; animation: slide 1.2s infinite ease-in-out; }
+		@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+	</style>
+</head>
+<body>
+	<div id="loading">
+		<img src="icon.png" alt="" onerror="this.style.display='none'" />
+		<div class="name">{{APP_NAME}}</div>
+		<div class="bar"></div>
+		<div class="status" id="status">Loading…</div>
+	</div>
+	<!-- Fyne focuses this hidden input to raise the on-screen keyboard on phones. -->
+	<input id="dummyEntry" style="position: absolute; left: 0; top: -100pt; z-index: -10; font-size: 32pt;" />
+	<script src="wasm_exec.js"></script>
+	<script>
+		(function () {
+			var status = document.getElementById('status');
+			var loading = document.getElementById('loading');
+			function fail(msg) { status.textContent = msg; status.className = 'error'; }
+
+			if (typeof WebAssembly === 'undefined') { return fail('This browser has no WebAssembly support.'); }
+			var probe = document.createElement('canvas');
+			if (!(window.WebGLRenderingContext && (probe.getContext('webgl') || probe.getContext('experimental-webgl')))) {
+				return fail('This browser has no WebGL support, which the app needs to draw.');
+			}
+			if (location.protocol === 'file:') {
+				return fail('Open this page through a web server (GoForms: Serve WebAssembly Build), not from disk - browsers refuse to run .wasm over file://.');
+			}
+
+			// Hide the loading screen once Fyne has created its canvas.
+			var observer = new MutationObserver(function () {
+				if (document.querySelector('canvas')) { loading.style.display = 'none'; observer.disconnect(); }
+			});
+			observer.observe(document.body, { childList: true, subtree: true });
+
+			var go = new Go();
+			// Streaming compilation needs the server to send application/wasm;
+			// when it does not (a plain file server), fall back to a full read.
+			function buffered() {
+				return fetch('{{WASM_FILE}}').then(function (r) {
+					if (!r.ok) { throw new Error(r.status + ' ' + r.statusText); }
+					return r.arrayBuffer();
+				}).then(function (b) { return WebAssembly.instantiate(b, go.importObject); });
+			}
+			var ready = WebAssembly.instantiateStreaming
+				? WebAssembly.instantiateStreaming(fetch('{{WASM_FILE}}'), go.importObject).catch(buffered)
+				: buffered();
+			ready.then(function (result) {
+				status.textContent = 'Starting…';
+				go.run(result.instance);
+			}).catch(function (err) {
+				fail('Could not load {{WASM_FILE}}: ' + err);
+			});
+		})();
+	</script>
+</body>
+</html>
