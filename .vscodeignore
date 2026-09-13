@@ -28,6 +28,10 @@ tool/*.exe
 tool/goformsdesigner
 tool/goformsdesigner.exe
 
+# Development notes: the listing shows README.md, and nothing else needs
+# to ship with the extension.
+DEVELOPING.md
+
 # Tests aren't needed at runtime and only slow the first-activation build.
 tool/*_test.go
 

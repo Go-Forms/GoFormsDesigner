@@ -1,269 +1,111 @@
 # GoForms Designer
 
-[![CI](https://github.com/Go-Forms/GoFormsDesigner/actions/workflows/ci.yml/badge.svg)](https://github.com/Go-Forms/GoFormsDesigner/actions/workflows/ci.yml)
-![License](https://img.shields.io/badge/license-MIT-blue)
+A drag-and-drop form designer for [GoForms](https://github.com/Go-Forms/GoForms),
+a Windows Forms-style GUI framework for Go.
 
-The visual designer for [GoForms](https://github.com/Go-Forms/GoForms) —
-a drag-and-drop form editor for VS Code that reads and writes plain Go.
+Drag a button onto a form, and the designer writes the Go that puts it there.
+Drag it somewhere else, and it rewrites those lines. The file it edits is
+ordinary Go you can read, diff and review — not a resource blob you are never
+meant to open.
 
-VS Code companion extension for
-[GoForms](https://github.com/Go-Forms/GoForms), a WinForms-style GUI framework
-for Go. Provides:
+## What it does
 
-- **`GoForms: Create New Project...`** - scaffolds a new GoForms app (empty
-  or a full example) with a correct `go.mod` (including the local
-  correct `go.mod`), `main.go`, and a `MainForm`.
-- **`GoForms: New Form...`** - available from the command palette and from
-  the Explorer's folder right-click menu - adds a new `<Name>/<Name>.go` +
-  `<Name>-designer.go` pair to any folder.
-- **`GoForms: Set Framework Path...`** - points the extension at your local
-  GoForms checkout (used for the `replace` directive above).
-- **`GoForms: Open Visual Designer`** - drag-and-drop editing of
-  `*-designer.go` files (custom editor, `designerEditorProvider.ts`), with a
-  toolbox covering the full GoForms control catalog (23 types as of this
-  writing - Label/Button/TextBox/CheckBox/RadioButton/ComboBox/ListBox/
-  Panel/GroupBox/PictureBox/ProgressBar/TrackBar/NumericUpDown/
-  DateTimePicker/LinkLabel/ListView (grid)/TreeView/TabControl/ToolStrip/
-  StatusStrip/Splitter/ScrollBox/ColorPickerButton), each rendered to
-  approximate its real on-screen look rather than a generic labeled box.
+**Edits forms visually.** Open any `*-designer.go` file and it becomes a
+canvas with a toolbox of 34 controls, each drawn to approximate its real
+on-screen look rather than as a labelled box. Drag to move, drag the edges to
+resize, Ctrl or Shift click to select several and move them together. Edges
+snap to their neighbours' left, right and centre with a guide line drawn
+where they line up.
 
-The scaffolding commands (`src/extension.ts`, `src/scaffold.ts`) are plain
-Node file-copying with `{{TOKEN}}` substitution against the static template
-sources in `templates/empty/` and `templates/example/`. The visual designer
-(`src/designerEditorProvider.ts`, `media/*`) shells out to a small bundled,
-dependency-free Go CLI (`tool/*.go`, driven via `src/goTool.ts`) that parses
-and rewrites `-designer.go` files; that CLI is built once on first activation
-into the extension's global storage (requires `go` on `PATH`).
+**Keeps your code separate from the generated code.** A form is split the way
+a WinForms form is split into Form1.cs and Form1.Designer.cs: layout in
+MainForm-designer.go, your handlers in MainForm.go. The designer only ever
+writes the first, so it cannot eat what you wrote.
 
-## Editing
+**Writes event handlers for you.** Every control lists its own events first,
+then the ones inherited from Control — Click, MouseDown, KeyPress, GotFocus
+and the rest. Wiring one generates a fully typed handler stub in your file
+and adds the import it needs, respecting the alias if you import the package
+under one. Re-wiring an event rewrites the line that is already there instead
+of leaving two handlers running.
 
-**Canvas.** Drag to move, drag the corner handle to resize. The form itself
-has grips on its right edge, its bottom edge and its corner - width, height,
-both.
+**Edits properties with the right editor per type.** A checkbox for booleans,
+a spinner for numbers, a dropdown for enums, a row of checkboxes for flag
+sets like Anchor. Renaming a control renames its field, every reference to
+it, and any handler still named after it.
 
-**Selecting the form.** Click its background, click its title bar, click
-beside it, or press <kbd>Escape</kbd>. Its title and size are then in the
-properties panel. Escape is the one that always works: a form filled edge to
-edge by a docked control has no background left to click. Ctrl or Shift click extends the selection;
-dragging any member then moves the whole group, and edges snap to siblings'
-left/right/centre with a guide line drawn where they line up.
+**Tidies up after itself.** Every edit ends with a cleanup pass that removes
+what the edit made redundant: setters a later call already overrides, stacked
+wirings of one event, a control added to a container twice, duplicate field
+declarations. Only the statements it models are touched; anything it does not
+recognise is left exactly as you wrote it.
 
-**Properties.** Name (renames the field, every reference to it, and any
-handler still named after it), bounds, text, items, and every setter the
-catalogue knows — with the right editor per type: checkbox for booleans,
-spinner for numbers, dropdown for enums, and a row of checkboxes for flag
-sets like `Anchor`. Anchor, Dock, TabIndex and TabStop appear on every
-control, since they come from `ControlBase`.
+**Has undo of its own.** Ctrl+Z and Ctrl+Y inside the designer, with a
+snapshot history the extension keeps itself — the file is written directly
+rather than through the editor's document, so the editor's undo never sees
+these changes.
 
-**Events.** Every control lists its own events first, then the ones it
-inherits from `Control` (`Click`, `MouseDown`, `KeyPress`, `GotFocus`, ...).
-Wiring one generates a handler stub in the paired hand-written file, fully
-qualified — `e goforms.MouseEventArgs` for `Click`, `e goforms.KeyEventArgs`
-for `KeyDown` — and adds the `goforms` import if that file did not have one
-yet. A file that imports the package under an alias gets stubs written with
-that alias.
+**Themes.** A project's `<name>-styles.go` opens as a visual theme editor: a
+picker and a hex box per colour, numbers for the metrics, and a live preview
+showing them together. A field left out keeps the framework default, and that
+*unset* state is reachable again from every row.
 
-Re-wiring an event rewrites the `Handle` line already in the file rather than
-adding a second one. `Event.Handle` is multicast, so an appended call would
-leave *both* handlers running.
+**Scaffolds projects and forms.** Create a new project — empty, a worked
+example, one aimed at the browser, or one aimed at Android — and get a
+correct go.mod, a main.go, a first form, build tasks and a .gitignore. Add a
+form to any folder from the Explorer's right-click menu.
 
-**Tidy.** Every edit finishes with a cleanup pass over the designer file that
-removes what the edit made redundant:
+**Builds and runs the project.** One command each for the desktop, the
+browser and Android, plus a local server that opens a WebAssembly build in
+your browser and a one-click install of an Android APK onto a connected
+phone. Every step runs as a plain process in a terminal panel, so a failure
+is the compiler's own message with a clickable file and line.
 
-- setter calls a later call already overrides (`SetDock` written five times),
-- stacked wirings of one event,
-- a control added to a container more than once,
-- duplicate struct field declarations,
-- whole lines that are nothing but a commented-out generated statement.
-
-Only calls the catalogue models are touched, so item-adding calls (`AddTab`,
-`AddButton`, `AddNode`) and indexed setters (`SetColumnStyle(0, ...)`) are
-left alone, as is anything the tool does not recognize at all. Run it by hand
-on a file edited outside the designer with **`GoForms: Tidy Designer File`**,
-or `goformsdesigner tidy <file>`.
-
-**Undo/redo.** Ctrl+Z / Ctrl+Y inside the designer. The designer edits the
-file through the Go tool, which writes it directly rather than through a
-`TextDocument`, so the editor's own undo never sees these changes and the
-extension keeps its own snapshot history instead.
-
-**Alignment.** With more than one control selected the panel offers the
-WinForms Format commands — align left/right/top/bottom, centre, same
-width/height — all measured against the last-clicked control.
-
-## Themes
-
-`GoForms: Edit Theme` opens a project's `<name>-styles.go` - the one
-`goforms.Theme` literal that decides how the whole application looks - as a
-visual editor: a picker and a hex box per colour, numbers for the metrics, and
-a preview beside them showing them together.
-
-A theme field left out keeps Fyne's default for that property, so *unset* is a
-real state rather than a blank. Every row has a clear button to return to it,
-and an unset colour is still drawn in the preview as the default it falls
-through to.
-
-The file is ordinary Go and stays the source of truth. Fields are spliced
-individually, so comments inside the literal survive an edit; a field holding
-an expression rather than a literal is shown read-only rather than being
-flattened into a hex value.
-
-New projects get a styles file when `Create New Project` is answered with
-anything but "Default look".
-
-## Keeping the preview honest
-
-The canvas is meant to show what will really appear at runtime, so
-`media/gridLayout.js` is a deliberate port of `DataGridView`'s column-fitting
-policy from GoForms rather than an approximation.
-
-`npm test` checks that port against `test/grid-golden.json`, a fixture
-GoForms' own `TestGoldenGridWidths` generates. Regenerate it after touching
-either side:
-
-    cd ../GoForms && go test -run TestGoldenGridWidths .   # a GoForms checkout
-    cd ../GoFormsDesigner && npm test
-
-The two sides drift silently when they drift at all - a column ends up a few
-pixels off in the canvas and nowhere else - so the fixture is the only thing
-that reports it.
-
-## Installing
-
-### Option A: build a `.vsix` and install it (closest to "real" install)
-
-```
-npm ci
-npm run package        # runs the bundle, then vsce package
-code --install-extension goforms-designer-<version>.vsix
-```
-
-`npm ci` rather than `npm install`: esbuild ships a native binary per
-platform, so a `node_modules` copied between Windows and Linux (or checked
-out on one and used on the other) fails the bundle step with a platform
-mismatch. `npm ci` installs from the lockfile for the machine it runs on.
-
-`npm run package` produces the `.vsix` in the repo root, and
-`code --install-extension` installs it exactly as installing from the
-Marketplace would. Reload the window afterwards if the editor was already
-open. Every green CI build also attaches a ready-made `.vsix`, and every
-release publishes one - see [Releasing](#releasing).
-
-To update after making changes, bump the `version` in `package.json`,
-re-run the three commands above, and reinstall (or use
-`code --install-extension <file> --force`).
-
-**If you use VS Code Profiles** (Profile icon in the bottom-left, or a
-custom profile shown in the window title): `code --install-extension` only
-installs into the *default* profile. If your window uses a named profile,
-the install silently doesn't apply there and the custom editor/commands
-never activate with no visible error. Install into that profile explicitly:
-
-```
-code --profile "Your Profile Name" --install-extension goforms-designer-<version>.vsix
-```
-
-(find the exact name in the profile switcher, or in the window title bar).
-
-### Option B: run from source in an Extension Development Host (fastest for development)
-
-```
-npm ci
-npm run build
-```
-
-Then open this folder in VS Code and press **F5** (or Run > Start
-Debugging). That launches a second "Extension Development Host" VS Code
-window with the extension loaded from source - no packaging step needed.
-`npm run watch` rebuilds on save if you want the F5 window to pick up
-changes after a reload (`Ctrl+R` / `Cmd+R` in the dev host window).
+Nothing needs the network beyond what Go itself downloads once.
 
 ## Requirements
 
-- VS Code 1.85+. Windows, Linux and macOS are all supported; nothing in the
-  extension is platform-specific, and CI builds and tests it on all three.
-- A Go toolchain. It is needed only the first time the designer runs, to
-  build `tool/*.go` into a helper binary cached in the extension's global
-  storage.
-- Nothing else. `Create New Project` scaffolds against the published
-  `github.com/Go-Forms/GoForms` module, which `go build` fetches like any
-  other dependency.
+- VS Code 1.85 or newer, on Windows, Linux or macOS.
+- A Go toolchain. It is needed the first time the designer runs, to build the
+  small helper that parses and rewrites designer files.
+- Nothing else for editing, scaffolding, or a desktop or WebAssembly build.
 
-  It also offers to build against a local checkout instead, which adds a
-  `replace` directive. That is for working on the framework itself: it ties
-  the project to a path on one machine, so it is the second option rather than
-  the default. Point it at your checkout once with
-  `GoForms: Set Framework Path...`.
+An Android build additionally needs the fyne command-line tool and the
+Android NDK. Neither is downloaded for you, both are looked for everywhere
+they are normally installed, and the guide explaining where to put them ships
+inside the extension — run **GoForms: Open Setup Guide**. **GoForms: Check
+Setup** reports what this machine has.
 
-### If it cannot find Go (usually Linux or macOS)
+## Getting started
+
+Run **GoForms: Create New Project…** from the command palette and answer
+three questions: where the project goes, which template, and how it should
+look. Open the MainForm-designer.go it created — the designer opens with it —
+and drag a control onto the canvas. Wire its Click event from the Events
+panel, and the handler stub appears in MainForm.go for you to fill in. Press
+the run button on the designer's toolbar to see it.
+
+An existing GoForms project needs none of that: open any designer file.
+
+## If it cannot find Go
 
 A GUI editor does not run a login shell, so it inherits the desktop session's
-`PATH` — not the one your `.bashrc` or `.zshrc` builds. The official Go
-tarball tells you to add `/usr/local/go/bin` in exactly those files, and
-asdf, mise and gvm all work the same way, so `go` working in your terminal
-says nothing about whether the editor can see it.
+PATH rather than the one your shell profile builds. That is why Go can work
+in your terminal and still be invisible to the editor.
 
-The extension looks in `goforms.goPath`, then `go.goroot`, then `GOROOT`,
-then `PATH`, then the usual install locations (`/usr/local/go/bin`,
-`/usr/lib/go/bin`, `/opt/homebrew/bin`, `/snap/bin`, `~/go/bin`, the asdf and
-mise shim directories, and the Windows equivalents), verifying each by
-running `go version` rather than trusting the file to exist.
+The extension looks in its own setting first, then the Go extension's
+setting, then GOROOT, then PATH, then the usual install locations on each
+platform, verifying each candidate by running it. If yours is somewhere else,
+point the `goforms.goPath` setting at it once. **GoForms: Check Setup** lists
+everywhere it looked.
 
-If yours is somewhere else, point at it once:
+## Links
 
-```jsonc
-// settings.json
-"goforms.goPath": "/usr/local/go/bin/go"
-```
+- [GoForms framework](https://github.com/Go-Forms/GoForms) — the library this
+  designs for.
+- [Documentation and guide](https://go-forms.github.io/GoForms/)
+- [Showcase application](https://github.com/Go-Forms/GoFormsShowcase) — every
+  control and layout, running.
+- [Report a problem](https://github.com/Go-Forms/GoFormsDesigner/issues)
 
-Run **`GoForms: Check Setup`** to see which `go` was found, everywhere that
-was searched, whether the helper CLI builds and answers, and where the
-framework checkout is.
-
-## Releasing
-
-Publishing is driven by the version in `package.json`; the tag only has to
-agree with it, and `.github/workflows/release.yml` fails the run if it does
-not — a mismatch is the one mistake a marketplace accepts and then serves
-forever.
-
-    # bump "version" in package.json, update CHANGELOG.md, commit, then:
-    git tag v0.7.0
-    git push origin v0.7.0
-
-That runs the full check suite, builds the `.vsix`, publishes it to the VS
-Code Marketplace and to Open VSX, and cuts a GitHub release with the `.vsix`
-attached. Editors that pull from either marketplace then offer the update on
-their own.
-
-Two optional repository secrets decide how far it goes. `VSCE_PAT` is an
-Azure DevOps token with *Marketplace: Manage* for the `goforms` publisher;
-`OVSX_PAT` is an Open VSX access token, which is what reaches VSCodium,
-Cursor, Gitpod and code-server. A publishing step whose token is missing is
-skipped rather than failed, so a fork with neither still gets a release with
-an installable `.vsix` on it.
-
-`workflow_dispatch` runs the same job with `dry_run` on: everything is built
-and verified, nothing is published.
-
-## Repo layout
-
-```
-src/
-  extension.ts               <- activation, and the commands that act on files
-  scaffold.ts                <- template copying, token substitution, validation
-  goTool.ts                  <- the only caller of the bundled Go CLI
-  designerEditorProvider.ts  <- the designer's custom editor and its webview host
-media/                       <- webview assets: the canvas and its layout
-                                ports, plus the theme editor
-templates/
-  empty/                     <- minimal project (go.mod, main.go, MainForm)
-  example/                   <- a fuller project, adapted from GoFormsDemo
-test/                        <- the extension's tests
-testlib/                     <- the DOM shim they run media/*.js against
-tool/                        <- the Go CLI: every read and write of Go source
-```
-
-The split that matters is `src/` against `tool/`: nothing in `src/` parses or
-writes Go. It builds `tool/` on first activation, caches the binary, and
-exchanges JSON with it (see `tool/README-tool.md`).
+MIT licensed.
