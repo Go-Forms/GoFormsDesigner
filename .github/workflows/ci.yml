@@ -100,7 +100,7 @@ jobs:
 
       # Every green build leaves an installable extension attached to it, so a
       # change can be tried in a real editor without waiting for a release.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: goforms-designer-vsix
           path: goforms-designer.vsix
