@@ -8,6 +8,8 @@ Drag it somewhere else, and it rewrites those lines. The file it edits is
 ordinary Go you can read, diff and review — not a resource blob you are never
 meant to open.
 
+![The designer editing a form, with the selected control's properties and events beside it](https://raw.githubusercontent.com/Go-Forms/GoFormsDesigner/main/images/designer-canvas.png)
+
 ## What it does
 
 **Edits forms visually.** Open any `*-designer.go` file and it becomes a
@@ -62,6 +64,67 @@ phone. Every step runs as a plain process in a terminal panel, so a failure
 is the compiler's own message with a clickable file and line.
 
 Nothing needs the network beyond what Go itself downloads once.
+
+![The toolbox: every control the designer can add, grouped and searchable](https://raw.githubusercontent.com/Go-Forms/GoFormsDesigner/main/images/designer-toolbox.png)
+
+The toolbox holds 34 controls, grouped the way Visual Studio groups them, with
+a search box. Clicking a type adds it to the form, or into whichever container
+is selected.
+
+![The theme editor: a colour picker per field and a live preview](https://raw.githubusercontent.com/Go-Forms/GoFormsDesigner/main/images/designer-theme.png)
+
+## Commands
+
+All of these are in the command palette (Ctrl+Shift+P). Most are also on a
+menu: the designer's toolbar has run and build, `*-designer.go` files have
+Open as Text and Tidy in the editor title bar, and a folder's right-click menu
+in the Explorer has New Form.
+
+| Command | What it does |
+| --- | --- |
+| **GoForms: Create New Project…** | Scaffolds a project — go.mod, main.go, a first form, build tasks, a .gitignore. Asks for a template (empty, example, web, android) and a look. |
+| **GoForms: New Form…** | Adds a `Forms/<Name>/` pair: the designer file and the hand-written one. |
+| **GoForms: Open Visual Designer** | Opens the current `*-designer.go` as a canvas. |
+| **GoForms: Open as Text** | The same file back as Go source. |
+| **GoForms: Tidy Designer File** | Runs the cleanup pass by hand, for a file edited outside the designer. |
+| **GoForms: Edit Theme** | Opens a project's `<name>-styles.go` as the visual theme editor. |
+| **GoForms: Open Theme as Text** | The same file back as Go source. |
+| **GoForms: Build…** | Asks which target to build: desktop, WebAssembly or Android. |
+| **GoForms: Build for Desktop** | `go build` into `build/desktop/`. |
+| **GoForms: Run on Desktop** | Builds and runs it. Also the play button on the designer's toolbar. |
+| **GoForms: Build for WebAssembly** | Compiles for the browser and assembles the loader page into `build/wasm/`. |
+| **GoForms: Serve WebAssembly Build in Browser** | Serves that build on a loopback port and opens it. |
+| **GoForms: Build for Android (APK)** | Packages an APK into `build/android/`. |
+| **GoForms: Install APK on Connected Device (adb)** | Installs the newest APK on a phone over adb. |
+| **GoForms: Check Setup** | Reports which Go was found and everywhere it looked, whether the helper builds, and what is present for WebAssembly and Android. |
+| **GoForms: Set Framework Path…** | Points a project at a local GoForms checkout. |
+| **GoForms: Set Android NDK Path…** | For an NDK somewhere the search does not cover. |
+| **GoForms: Set fyne CLI Path…** | Likewise for the fyne tool. |
+| **GoForms: Open Setup Guide** | The bundled guides for the Android NDK, the fyne CLI and WebAssembly. |
+
+## Things worth knowing
+
+- **Escape selects the form.** A form covered edge to edge by a docked control
+  has no background left to click, so Escape is the way back to its own
+  properties — title, width, height.
+- **Renaming a control renames everything.** The struct field, every reference
+  to it, and any handler still named after it.
+- **Ctrl or Shift click extends the selection.** Dragging any member then moves
+  the whole group, and edges snap to their neighbours with a guide line drawn
+  where they line up. With more than one selected, the panel offers the
+  WinForms Format commands — align, centre, same size — all measured against
+  the last control you clicked.
+- **Undo is the designer's own.** Ctrl+Z and Ctrl+Y inside the canvas. The file
+  is written directly rather than through the editor's document, so the
+  editor's undo never sees these edits and the extension keeps its own history.
+- **Docked controls are drawn where they will really be**, not at their stored
+  coordinates, and marked with a dashed outline — dragging one has no effect,
+  which is what the outline is telling you.
+- **A control the catalogue does not model is left alone.** The cleanup pass
+  only touches statements it understands, so hand-written setup inside
+  `initializeComponent` survives.
+- **The first run needs Go** and takes a moment: the helper that parses and
+  rewrites your files is compiled then, into the extension's storage.
 
 ## Requirements
 

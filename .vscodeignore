@@ -28,6 +28,11 @@ tool/*.exe
 tool/goformsdesigner
 tool/goformsdesigner.exe
 
+# The listing's screenshots are served from the repository over https -
+# the Marketplace does not resolve relative image paths - so they only need
+# to be committed, not packaged.
+images/**
+
 # Development notes: the listing shows README.md, and nothing else needs
 # to ship with the extension.
 DEVELOPING.md
