@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"go/format"
 	"go/token"
 	"os"
 	"sort"
@@ -71,11 +73,38 @@ func applyOps(path string, ops []Op) (*FormModel, error) {
 		}
 	}
 
+	// gofmt once the whole batch is in. An op is a text splice, so it has no
+	// idea that inserting `comboBox1 *goforms.ComboBox` has just widened the
+	// struct's alignment column; without this the file drifts a little
+	// further out of gofmt shape with every control the user drops.
+	if err := gofmtFile(path); err != nil {
+		return rollback(err)
+	}
+
 	fresh, err := parseFile(path)
 	if err != nil {
 		return rollback(fmt.Errorf("re-parse after apply: %w", err))
 	}
 	return fresh.model, nil
+}
+
+// gofmtFile rewrites path in gofmt form, leaving it alone if it is already
+// formatted or if it does not parse - a file we cannot format is a file the
+// caller is about to fail on anyway, and mangling it here would only hide
+// the real error.
+func gofmtFile(path string) error {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	formatted, err := format.Source(src)
+	if err != nil || bytes.Equal(formatted, src) {
+		return nil
+	}
+	if err := os.WriteFile(path, formatted, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 // spliceEdits applies one op's edits to src, working from the end of the

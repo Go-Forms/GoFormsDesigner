@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -64,6 +66,15 @@ func mustApply(t *testing.T, path string, ops ...Op) (*FormModel, string) {
 	if _, err := parser.ParseFile(token.NewFileSet(), path, b, parser.ParseComments); err != nil {
 		t.Fatalf("apply produced unparseable Go:\n%s\nerror: %v", b, err)
 	}
+	// And in gofmt shape: a designer file is ordinary source the user reads
+	// and edits, so dropping a control must not leave it looking hand-mangled.
+	formatted, err := format.Source(b)
+	if err != nil {
+		t.Fatalf("gofmt rejected the result:\n%s\nerror: %v", b, err)
+	}
+	if !bytes.Equal(formatted, b) {
+		t.Fatalf("apply left the file unformatted:\n%s\ngofmt wants:\n%s", b, formatted)
+	}
 	return model, string(b)
 }
 
@@ -89,7 +100,7 @@ func TestAddDataGridViewGeneratesSeededColumns(t *testing.T) {
 	if !strings.Contains(src, `mf.grid1 = goforms.NewDataGridView("Column 1", "Column 2", "Column 3")`) {
 		t.Fatalf("grid should be seeded with default columns:\n%s", src)
 	}
-	if !strings.Contains(src, "grid1 *goforms.DataGridView") {
+	if !declaresField(src, "grid1", "*goforms.DataGridView") {
 		t.Fatalf("struct field should be declared:\n%s", src)
 	}
 	if !strings.Contains(src, "mf.grid1.SetBounds(30, 60, 400, 200)") {
@@ -425,6 +436,18 @@ func writePair(t *testing.T, designer, logic string) string {
 	return dPath
 }
 
+// declaresField reports whether src declares `name typ` as a struct field.
+// The gap between the two is however wide gofmt's alignment made it, so the
+// test asks about the declaration rather than about its spacing.
+func declaresField(src, name, typ string) bool {
+	for _, line := range strings.Split(src, "\n") {
+		if f := strings.Fields(line); len(f) == 2 && f[0] == name && f[1] == typ {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRenameUpdatesFieldAndEveryReference(t *testing.T) {
 	path := writeFixture(t, designerFixture)
 	mustApply(t, path, Op{Op: "add", ID: "btnOld", Type: "Button", X: 5, Y: 5, W: 80, H: 30})
@@ -434,8 +457,10 @@ func TestRenameUpdatesFieldAndEveryReference(t *testing.T) {
 	if strings.Contains(src, "btnOld") {
 		t.Fatalf("no trace of the old name should remain:\n%s", src)
 	}
+	if !declaresField(src, "btnSave", "*goforms.Button") {
+		t.Errorf("the renamed field should be declared:\n%s", src)
+	}
 	for _, want := range []string{
-		"btnSave *goforms.Button",
 		"mf.btnSave = goforms.NewButton(",
 		"mf.btnSave.SetBounds(5, 5, 80, 30)",
 		"mf.AddControl(mf.btnSave)",
