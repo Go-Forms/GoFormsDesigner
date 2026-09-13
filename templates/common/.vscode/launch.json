@@ -1,0 +1,32 @@
+{
+	// Debugging this GoForms app. F5 starts it under Delve, so a breakpoint
+	// in an event handler stops with the form still on screen and the whole
+	// call stack - which is the difference between "the button does nothing"
+	// and knowing why.
+	//
+	// It needs the Go extension (golang.go) and Delve; the extension offers
+	// to install Delve the first time you press F5, and that is the only
+	// step here that needs a connection.
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "GoForms: debug",
+			"type": "go",
+			"request": "launch",
+			"mode": "debug",
+			"program": "${workspaceFolder}",
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			// The same thing without the debugger attached: the fastest way
+			// to just see the form. Ctrl+F5 runs it.
+			"name": "GoForms: run",
+			"type": "go",
+			"request": "launch",
+			"mode": "debug",
+			"program": "${workspaceFolder}",
+			"cwd": "${workspaceFolder}",
+			"noDebug": true
+		}
+	]
+}

@@ -369,8 +369,34 @@ export class GoFormsDesignerEditorProvider implements vscode.CustomTextEditorPro
 	<div id="app">
 		<div id="main">
 			<div id="canvas-wrap">
+				<!-- The three canvas modes Visual Studio puts on its Layout and
+				     View menus: how big the form is drawn, whether it can be
+				     dragged, and the tab order overlay. -->
+				<div id="canvas-toolbar">
+					<label class="canvas-tool-label" for="zoom-select">Zoom</label>
+					<select id="zoom-select" title="How large the form is drawn. Does not change the form.">
+						<option value="0.5">50%</option>
+						<option value="0.75">75%</option>
+						<option value="1" selected>100%</option>
+						<option value="1.25">125%</option>
+						<option value="1.5">150%</option>
+						<option value="2">200%</option>
+						<option value="fit">Fit</option>
+					</select>
+					<button type="button" id="lock-toggle" class="canvas-tool" aria-pressed="false"
+						title="Lock Controls — click still selects, but nothing moves or resizes">Lock</button>
+					<button type="button" id="taborder-toggle" class="canvas-tool" aria-pressed="false"
+						title="Tab Order — click the controls in the order you want Tab to visit them">Tab order</button>
+				</div>
 				<div id="canvas-scroll">
 					<div id="form-canvas"></div>
+				</div>
+				<!-- The component tray, as in the Visual Studio designer: the
+				     things that belong to the form but have no place on it -
+				     a Timer, the dialogs. Hidden until there is one. -->
+				<div id="component-tray" hidden>
+					<div id="component-tray-label">Components</div>
+					<div id="component-tray-items"></div>
 				</div>
 			</div>
 			<!-- One side panel with two tabs, as in the Visual Studio designer:

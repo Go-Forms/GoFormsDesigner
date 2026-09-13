@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.12.0
+
+Four things the designer could not do at all, rather than four things it did
+awkwardly.
+
+### The component tray
+
+The framework has nine things that belong to a form without being on it. The
+designer modelled none of them: the toolbox held only what could be drawn, so
+a Timer meant leaving for the text editor, and the property panel and the
+rename-everything machinery might as well not have existed for it.
+
+There is now a tray below the form, as in the Visual Studio designer, holding
+`Timer`, `OpenFileDialog`, `SaveFileDialog`, `FolderBrowserDialog` and
+`ColorDialog`. They select, rename, configure and delete like any control.
+
+Getting there meant teaching the tool three shapes it had never written.
+A component has no bounds and no `AddControl`, so what closes its block is the
+last statement that mentions it - get that wrong and deleting one leaves
+statements behind referring to a field that no longer exists. A dialog's
+`Title` is an exported field, not a setter, so properties can be assignments.
+And a Timer's `Enabled` is `Start()`/`Stop()` rather than a value, so a bool
+can be a bare call: true writes the line, false deletes it, and the call goes
+last so a timer is never started before its `Tick` is wired.
+
+Each property now has exactly one writer - setter, field, bare method or
+constructor argument - and a test says so for every type in the catalog. Two
+writers for one property is how a file comes to hold two values for it.
+
+### F5
+
+A new project got a `tasks.json` and no `launch.json`, so F5 opened the
+"select a debugger" quick pick. Debugging is where a debugger earns its keep
+in a GUI app - a breakpoint in a Click handler stops with the form still on
+screen - so it should be the key it is everywhere else. New projects ship with
+the configurations; **GoForms: Add Debug Configuration** adds them to an
+existing one, through VS Code's own `launch` settings so it merges with
+whatever is already there rather than overwriting it. **GoForms: Debug** and
+the bug icon on the designer's toolbar start a session, and both say plainly
+if the Go extension - which supplies the debugger - is not installed.
+
+### Russian
+
+Every command title, setting description, walkthrough step and welcome button
+now has a Russian version, in `package.nls.ru.json`. It follows VS Code's
+display language and has no setting of its own. A test keeps the two files in
+step - a missing key falls back to English silently, so a half-finished
+translation looks finished until you hit the gap - and checks that no
+translation has altered a `command:` link, which would turn a button into
+nothing.
+
+### Zoom, Lock, Tab order
+
+Three modes above the canvas, from the Visual Studio Layout and View menus.
+
+**Zoom** draws the form at 50-200% or fits it to the window. The canvas is
+scaled with a CSS transform, which means every mouse delta arrives in screen
+pixels while the model is in form pixels; there are four places that convert
+between them and missing any one makes controls run away from the cursor at
+every zoom but 100%. The drag, the resize, the form resize and the drop-target
+arithmetic are each tested at a scale rather than only at 1.
+
+**Lock** refuses every drag and resize while leaving selection alone, which is
+the difference between locking a layout and making it read-only.
+
+**Tab order** numbers the controls where they sit and turns a click into "this
+one is next", instead of setting `tabIndex` one spin box at a time with the
+whole sequence held in your head.
+
 ## 0.11.0
 
 0.10.0 gave the extension the ability to build for three targets. This release

@@ -1641,3 +1641,158 @@ body {
 	outline: 1px dashed var(--vscode-charts-blue, #3794ff);
 	outline-offset: -3px;
 }
+
+/* ---------------------------------------------------------------------
+   The component tray
+   ---------------------------------------------------------------------
+   The strip below the form holding what belongs to it but is not on it:
+   a Timer, the dialogs. It sits outside #canvas-scroll deliberately, so
+   scrolling a form larger than the viewport does not scroll the tray out
+   of reach - the components are not at any position on the form, and
+   pretending they are was the whole problem. */
+#component-tray {
+	flex: 0 0 auto;
+	border-top: 1px solid var(--vscode-panel-border, #454545);
+	background: var(--vscode-editorWidget-background, #252526);
+	padding: 6px 10px 8px;
+	max-height: 30%;
+	overflow-y: auto;
+}
+
+#component-tray-label {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	opacity: 0.65;
+	margin-bottom: 6px;
+}
+
+#component-tray-items {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.tray-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px 4px 6px;
+	border: 1px solid var(--vscode-panel-border, #454545);
+	border-radius: 4px;
+	background: var(--vscode-button-secondaryBackground, #3a3d41);
+	color: var(--vscode-foreground, #ccc);
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.tray-item:hover {
+	background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+.tray-item.selected {
+	border-color: var(--vscode-focusBorder, #0078d4);
+	box-shadow: 0 0 0 1px var(--vscode-focusBorder, #0078d4);
+}
+
+.tray-item.co-selected {
+	outline: 1px dashed var(--vscode-focusBorder, #007fd4);
+	outline-offset: 1px;
+}
+
+.tray-icon {
+	font-size: 14px;
+	line-height: 1;
+}
+
+.tray-name {
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* ---------------------------------------------------------------------
+   Canvas modes: zoom, lock, tab order
+   --------------------------------------------------------------------- */
+#canvas-toolbar {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 10px;
+	border-bottom: 1px solid var(--vscode-panel-border, #454545);
+	background: var(--vscode-editorWidget-background, #252526);
+	font-size: 12px;
+}
+
+.canvas-tool-label {
+	opacity: 0.7;
+}
+
+#zoom-select {
+	background: var(--vscode-dropdown-background, #3c3c3c);
+	color: var(--vscode-dropdown-foreground, #ccc);
+	border: 1px solid var(--vscode-dropdown-border, #3c3c3c);
+	border-radius: 3px;
+	padding: 2px 4px;
+	font: inherit;
+}
+
+.canvas-tool {
+	background: transparent;
+	color: var(--vscode-foreground, #ccc);
+	border: 1px solid var(--vscode-panel-border, #454545);
+	border-radius: 3px;
+	padding: 2px 8px;
+	font: inherit;
+	cursor: pointer;
+}
+
+.canvas-tool:hover {
+	background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+
+.canvas-tool.active {
+	background: var(--vscode-inputOption-activeBackground, rgba(0, 120, 212, 0.35));
+	border-color: var(--vscode-inputOption-activeBorder, #0078d4);
+}
+
+/* Locked: no resize grips anywhere, and the cursor stops promising a drag
+   that will not happen. Selection still works - that is the difference
+   between locking a layout and making it read-only. */
+#form-canvas.locked .resize-handle,
+#form-canvas.locked .form-grip {
+	display: none;
+}
+
+#form-canvas.locked .ctrl {
+	cursor: default;
+}
+
+/* Tab order mode: a number over each control, and no drag handles, because
+   here a click means "you are next" rather than "you are selected". */
+#form-canvas.tab-order .resize-handle {
+	display: none;
+}
+
+#form-canvas.tab-order .ctrl {
+	cursor: pointer;
+}
+
+.tab-badge {
+	position: absolute;
+	top: -8px;
+	left: -8px;
+	min-width: 18px;
+	height: 18px;
+	padding: 0 4px;
+	box-sizing: border-box;
+	border-radius: 9px;
+	background: var(--vscode-inputValidation-infoBackground, #063b49);
+	border: 1px solid var(--vscode-focusBorder, #0078d4);
+	color: var(--vscode-foreground, #ccc);
+	font-size: 11px;
+	line-height: 16px;
+	text-align: center;
+	pointer-events: none;
+	z-index: 20;
+}

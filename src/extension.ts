@@ -26,6 +26,7 @@ import {
 	validateModuleName,
 } from './scaffold';
 import { registerBuildCommands, resolveProject } from './build';
+import { registerDebugCommands } from './debug';
 import { registerNavigation } from './navigate';
 import { stopAllServers } from './serve';
 import { registerStatus } from './status';
@@ -42,6 +43,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 
 	registerBuildCommands(context);
+	registerDebugCommands(context);
 	registerNavigation(context);
 	registerStatus(context);
 	registerDesignerEditorIfAvailable(context);

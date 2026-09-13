@@ -167,7 +167,13 @@ func one(e *edit, err error) ([]edit, error) {
 
 func mustControl(r *parseResult, id string) (*pcontrol, error) {
 	pc, ok := r.controls[id]
-	if !ok || pc.blockEnd == 0 {
+	if !ok {
+		return nil, fmt.Errorf("no such control %q", id)
+	}
+	// blockEnd is what proves a control was really assembled rather than
+	// merely constructed - except for a tray component, which has no
+	// AddControl and is closed by its last statement instead.
+	if pc.blockEnd == 0 && !isNonVisual(pc.spec.Type) {
 		return nil, fmt.Errorf("no such control %q", id)
 	}
 	return pc, nil
@@ -361,15 +367,29 @@ func planSetProp(r *parseResult, op Op) (*edit, error) {
 		return nil, err
 	}
 	desc := catalog[pc.spec.Type]
+
+	// A bool written as a call - a Timer's Start(). There is no argument to
+	// replace: turning it on writes the line, turning it off deletes it.
+	if method, ok := callForProp(desc, op.Prop); ok {
+		return planCallProp(r, pc, op, method)
+	}
+
 	text, err := formatPropValue(desc, op.Prop, op.Value)
 	if err != nil {
 		return nil, err
 	}
 
-	// The usual case: a setter call already exists, so just replace its
-	// argument in place.
+	// The usual case: a setter call (or field assignment, or constructor
+	// argument) already exists, so just replace its value in place.
 	if arg, ok := pc.singleArgs[op.Prop]; ok {
 		return &edit{offset(r.fset, arg.Pos()), offset(r.fset, arg.End()), text}, nil
+	}
+
+	// A property carried by an exported field rather than a setter.
+	if field, ok := fieldForProp(desc, op.Prop); ok {
+		insertAt, indent := afterConstructionLine(r, pc)
+		stmt := fmt.Sprintf("%s%s.%s.%s = %s\n", indent, r.model.RecvVar, op.ID, field, text)
+		return &edit{insertAt, insertAt, stmt}, nil
 	}
 
 	// Otherwise synthesize the whole call. Without this, any property left
@@ -377,10 +397,48 @@ func planSetProp(r *parseResult, op Op) (*edit, error) {
 	// since the toolbox emits no setters) would be permanently uneditable.
 	method, ok := setterForProp(desc, op.Prop)
 	if !ok {
+		if isCtorProp(desc, op.Prop) {
+			// The constructor is the only place this value lives, and the
+			// argument there is not a literal this tool can rewrite.
+			return nil, fmt.Errorf("%s's %s is set from an expression rather than a literal, so it cannot be edited here",
+				op.ID, op.Prop)
+		}
 		return nil, fmt.Errorf("control type %q has no setter for property %q", pc.spec.Type, op.Prop)
 	}
 	insertAt, indent := afterConstructionLine(r, pc)
 	stmt := fmt.Sprintf("%s%s.%s.%s(%s)\n", indent, r.model.RecvVar, op.ID, method, text)
+	return &edit{insertAt, insertAt, stmt}, nil
+}
+
+// planCallProp turns a bool property expressed as a method on or off. The
+// call goes at the end of the block rather than after the constructor, so a
+// Timer is started once everything it needs - its interval, its Tick handler
+// - is already in place.
+func planCallProp(r *parseResult, pc *pcontrol, op Op, method string) (*edit, error) {
+	if op.Value != "true" && op.Value != "false" {
+		return nil, fmt.Errorf("property %q is a bool, got %q", op.Prop, op.Value)
+	}
+	existing, wired := pc.callStmts[op.Prop]
+
+	if op.Value == "false" {
+		if !wired {
+			return nil, nil // already off; nothing to delete
+		}
+		start, end := wholeLines(r.src, offset(r.fset, existing.Start), offset(r.fset, existing.End))
+		return &edit{start, end, ""}, nil
+	}
+	if wired {
+		return nil, nil // already on
+	}
+	insertAt := offset(r.fset, pc.lastEnd)
+	for insertAt < len(r.src) && r.src[insertAt] != '\n' {
+		insertAt++
+	}
+	if insertAt < len(r.src) {
+		insertAt++
+	}
+	indent := leadingIndent(r.src, offset(r.fset, pc.blockStart))
+	stmt := fmt.Sprintf("%s%s.%s.%s()\n", indent, r.model.RecvVar, op.ID, method)
 	return &edit{insertAt, insertAt, stmt}, nil
 }
 
@@ -622,7 +680,7 @@ func planRemove(r *parseResult, op Op) ([]edit, error) {
 	if err != nil {
 		return nil, err
 	}
-	start, end := wholeLines(r.src, offset(r.fset, pc.blockStart), offset(r.fset, pc.blockEnd))
+	start, end := wholeLines(r.src, offset(r.fset, pc.blockStart), offset(r.fset, pc.end()))
 	edits := []edit{{start, end, ""}}
 	// Item-adding calls a hand-written file put *after* AddControl fall
 	// outside the block; leaving them would orphan `mf.<gone>.AddButton(...)`
@@ -695,7 +753,7 @@ func leadingIndent(src []byte, off int) string {
 // it - i.e. on the line just above its AddControl call, so remove still takes
 // it with the rest of the block.
 func beforeAddControlLine(r *parseResult, pc *pcontrol) (int, string) {
-	end := offset(r.fset, pc.blockEnd)
+	end := offset(r.fset, pc.end())
 	insertAt := end
 	for insertAt > 0 && r.src[insertAt-1] != '\n' {
 		insertAt--

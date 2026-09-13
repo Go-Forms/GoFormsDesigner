@@ -18,6 +18,16 @@ const root = path.join(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const contributes = manifest.contributes;
 
+/** Manifest strings are `%key%` references into package.nls.json, which is
+ * where the English text lives now that the UI is translated. Anything
+ * reading a title has to go through here or it reads the key. */
+const nls = JSON.parse(fs.readFileSync(path.join(root, 'package.nls.json'), 'utf8'));
+
+function resolveNls(text) {
+	const m = /^%(.+)%$/.exec(String(text));
+	return m ? nls[m[1]] ?? text : text;
+}
+
 /** The whole of src/, concatenated - enough to ask "is this string in the
  * source", which is what "is this command registered" comes down to. */
 function sources() {
@@ -147,12 +157,49 @@ test('the README lists exactly the snippets that exist', () => {
 test('the README lists every command the extension contributes', () => {
 	const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
 	const missing = contributes.commands
-		.map((c) => c.title)
+		.map((c) => resolveNls(c.title))
 		// The listing writes an ellipsis where the title has three dots, and
 		// drops the parenthetical a palette entry needs to disambiguate itself.
 		.map((t) => t.replace(/\.\.\.$/, '').replace(/\s*\([^)]*\)$/, ''))
 		.filter((t) => !readme.includes(t));
 	assert.deepStrictEqual(missing, [], 'commands with no entry in the README table');
+});
+
+test('every %key% in the manifest has an English string', () => {
+	// A key with no entry renders as the literal "%cmd.build.title%" in the
+	// command palette - which is exactly as broken as it looks, and shows up
+	// only when someone opens the palette.
+	const nls = JSON.parse(fs.readFileSync(path.join(root, 'package.nls.json'), 'utf8'));
+	const raw = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
+	const used = new Set([...raw.matchAll(/"%([^%"]+)%"/g)].map((m) => m[1]));
+
+	assert.deepStrictEqual([...used].filter((k) => !(k in nls)), [], 'keys used by package.json but not defined');
+	assert.deepStrictEqual(Object.keys(nls).filter((k) => !used.has(k)), [], 'strings defined but never used');
+});
+
+test('the translations cover the same keys as the source', () => {
+	// A missing key silently falls back to English, so a half-finished
+	// translation looks like a finished one until you hit the gap.
+	const nls = JSON.parse(fs.readFileSync(path.join(root, 'package.nls.json'), 'utf8'));
+	for (const file of fs.readdirSync(root).filter((f) => /^package\.nls\..+\.json$/.test(f))) {
+		const translated = JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
+		assert.deepStrictEqual(
+			Object.keys(nls).filter((k) => !(k in translated)),
+			[],
+			`${file} is missing keys`
+		);
+		assert.deepStrictEqual(
+			Object.keys(translated).filter((k) => !(k in nls)),
+			[],
+			`${file} has keys the source does not`
+		);
+		// A command link inside a welcome view or a walkthrough step is not
+		// prose: translating the command id breaks the button.
+		for (const [key, text] of Object.entries(translated)) {
+			const links = (s) => [...String(s).matchAll(/command:([\w.]+)/g)].map((m) => m[1]).sort();
+			assert.deepStrictEqual(links(text), links(nls[key]), `${file}: ${key} changed a command link`);
+		}
+	}
 });
 
 test('activation covers the windows the welcome view asks about', () => {

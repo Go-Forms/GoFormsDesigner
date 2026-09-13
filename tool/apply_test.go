@@ -407,11 +407,58 @@ func TestEveryCatalogEnumPropDeclaresItsValues(t *testing.T) {
 
 func TestEveryDeclaredKindHasASetter(t *testing.T) {
 	// Kinds keys are prop names; a typo there would silently fall back to
-	// KindString and quote a number or enum into the generated source.
+	// KindString and quote a number or enum into the generated source. A
+	// prop may be written by a setter call, an exported field, a bare
+	// method, or the constructor - but by one of them.
 	for typeName, desc := range catalog {
 		for prop := range desc.Kinds {
-			if _, ok := setterForProp(desc, prop); !ok {
-				t.Errorf("%s declares a kind for %q but has no setter producing it", typeName, prop)
+			if _, ok := writerForProp(desc, prop); !ok {
+				t.Errorf("%s declares a kind for %q but has no way to write it", typeName, prop)
+			}
+		}
+	}
+}
+
+func TestEveryTrayPropHasExactlyOneWriter(t *testing.T) {
+	// Two writers for one prop means the generated file sets it twice, and
+	// the day the two disagree is the day the designer and the running app
+	// stop matching.
+	for typeName, desc := range catalog {
+		props := map[string]bool{}
+		for p := range desc.Kinds {
+			props[p] = true
+		}
+		for _, p := range desc.Setters {
+			props[p] = true
+		}
+		for _, p := range desc.Fields {
+			props[p] = true
+		}
+		for p := range desc.Calls {
+			props[p] = true
+		}
+		for _, p := range desc.CtorProps {
+			props[p] = true
+		}
+		for prop := range props {
+			n := 0
+			if _, ok := setterForProp(desc, prop); ok {
+				n++
+			}
+			if _, ok := fieldForProp(desc, prop); ok {
+				n++
+			}
+			if _, ok := callForProp(desc, prop); ok {
+				n++
+			}
+			if isCtorProp(desc, prop) {
+				n++
+			}
+			// A control that inherits SetDock from ControlBase counts once
+			// through setterForProp, which is what we want; only a type
+			// declaring the same prop two ways trips this.
+			if n > 1 {
+				t.Errorf("%s.%s has %d writers; it must have one", typeName, prop, n)
 			}
 		}
 	}

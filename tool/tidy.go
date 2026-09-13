@@ -139,6 +139,13 @@ func deleteLine(edits []edit, r *parseResult, pos, end token.Pos, res *TidyResul
 // all. Two statements sharing a key are two answers to one question, and the
 // file can only be acting on the last of them.
 func stmtKey(r *parseResult, stmt ast.Stmt) (key string, ok bool) {
+	// mf.dlgOpen.Title = "x" - the tray components' properties are exported
+	// fields, so their "last one wins" duplicates are assignments rather
+	// than calls, and the call-shaped check below would never see them.
+	if assign, isAssign := stmt.(*ast.AssignStmt); isAssign {
+		return fieldAssignKey(r, assign)
+	}
+
 	expr, isExpr := stmt.(*ast.ExprStmt)
 	if !isExpr {
 		return "", false
@@ -194,6 +201,28 @@ func stmtKey(r *parseResult, stmt ast.Stmt) (key string, ok bool) {
 	// know whether repeating it means something. `RemoveAt(0)` twice removes
 	// two items; `AddTab("Page")` twice makes two pages. Left alone.
 	return "", false
+}
+
+// fieldAssignKey names the property a `<recv>.<field>.<Name> = ...`
+// statement writes, for the components configured that way. Only the fields
+// the catalog models are collapsed: an assignment to something this tool
+// does not understand may not be a property at all.
+func fieldAssignKey(r *parseResult, s *ast.AssignStmt) (string, bool) {
+	if s.Tok != token.ASSIGN || len(s.Lhs) != 1 {
+		return "", false
+	}
+	parts, isChain := selChain(s.Lhs[0])
+	if !isChain || len(parts) != 3 || parts[0] != r.model.RecvVar {
+		return "", false
+	}
+	pc, known := r.controls[parts[1]]
+	if !known {
+		return "", false
+	}
+	if _, modelled := fieldProp(catalog[pc.spec.Type], parts[2]); !modelled {
+		return "", false
+	}
+	return "field:" + parts[1] + "." + parts[2], true
 }
 
 // alwaysModelled are the setters every control understands regardless of

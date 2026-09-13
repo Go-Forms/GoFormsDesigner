@@ -25,8 +25,29 @@
 	 * @type {Map<string, HTMLElement>}
 	 */
 	const rendered = new Map();
+	/**
+	 * The tray element for each non-visual component. Kept apart from
+	 * `rendered` because the two are built, placed and diffed by completely
+	 * different code, and a component appearing in the canvas's render plan
+	 * would be drawn at 0,0 on top of the form.
+	 * @type {Map<string, HTMLElement>}
+	 */
+	const trayEls = new Map();
 	/** The digests the canvas currently reflects; see media/renderPlan.js. */
 	let prevDigests = [];
+	/**
+	 * How large the form is drawn. It is a CSS transform on the canvas, so
+	 * every mouse delta arrives in screen pixels and has to be divided by it
+	 * to become form pixels - see toFormPx. Nothing about the model changes.
+	 */
+	let zoom = 1;
+	/** 'fit' recomputes the zoom whenever the form or the viewport changes. */
+	let zoomMode = '1';
+	/** Lock Controls: selection still works, dragging and resizing do not. */
+	let locked = false;
+	/** Tab Order mode: the canvas shows each control's tab index, and
+	 * clicking assigns the next one. */
+	let tabOrderMode = false;
 	let selectedId = null;
 	// selectedIds is the whole selection; selectedId is its primary member -
 	// the one the properties panel edits and the one alignment aligns to.
@@ -174,6 +195,25 @@
 		return model && model.controls.find((c) => c.id === id);
 	}
 
+	// isComponent separates the two halves of model.controls: the things
+	// drawn on the form, and the things that merely belong to it - a Timer,
+	// a file dialog. They are one list in the file and in the Go tool,
+	// because they are all struct fields, and every piece of machinery here
+	// that is about *drawing* has to ask which kind it is holding.
+	function isComponent(spec) {
+		const desc = spec && catalog && catalog[spec.type];
+		return !!(desc && desc.NonVisual);
+	}
+
+	// canvasControls is what the canvas draws: everything except the tray.
+	function canvasControls() {
+		return model ? model.controls.filter((c) => !isComponent(c)) : [];
+	}
+
+	function trayControls() {
+		return model ? model.controls.filter(isComponent) : [];
+	}
+
 	function setSelection(id, additive) {
 		if (!additive) {
 			selectedIds = new Set(id ? [id] : []);
@@ -228,8 +268,12 @@
 			return;
 		}
 		ensureCanvasHost();
+		wireCanvasToolbar();
 		renderControlsTab();
 		renderCanvas();
+		applyZoom();
+		renderTabBadges();
+		renderTray();
 		renderProperties();
 	}
 
@@ -338,6 +382,126 @@
 		return canvas;
 	}
 
+	// ---------------------------------------------------------------------
+	// Canvas modes: zoom, lock, tab order
+	// ---------------------------------------------------------------------
+
+	// toFormPx converts a distance measured on screen into form pixels. Every
+	// drag, resize and hit test has to go through it: at 200% a 10-pixel
+	// mouse move is a 5-pixel move on the form, and skipping the conversion
+	// makes controls run away from the cursor at any zoom but 100%.
+	function toFormPx(screenPx) {
+		return screenPx / zoom;
+	}
+
+	function applyZoom() {
+		const canvas = $('form-canvas');
+		if (!canvas || !model) return;
+		if (zoomMode === 'fit') {
+			zoom = fitZoom();
+		}
+		canvas.style.transform = zoom === 1 ? '' : `scale(${zoom})`;
+		canvas.style.transformOrigin = 'top left';
+		// A transform does not change an element's layout box, so the scroll
+		// area would offer scrollbars for the unscaled size and clip a form
+		// drawn larger than it. The margin makes up the difference.
+		canvas.style.marginRight = zoom === 1 ? '' : model.formWidth * (zoom - 1) + 'px';
+		canvas.style.marginBottom = zoom === 1 ? '' : model.formHeight * (zoom - 1) + 'px';
+	}
+
+	// fitZoom is the largest scale at which the whole form fits the visible
+	// area, never above 100% - a small form blown up to fill the window is
+	// not what "fit" means to anyone.
+	function fitZoom() {
+		const scroll = $('canvas-scroll');
+		if (!scroll || !model || !model.formWidth || !model.formHeight) return 1;
+		const pad = 48; // the scroll host's padding, both sides
+		const w = (scroll.clientWidth || 0) - pad;
+		const h = (scroll.clientHeight || 0) - pad;
+		if (w <= 0 || h <= 0) return 1;
+		return Math.min(1, w / model.formWidth, h / model.formHeight);
+	}
+
+	function setZoom(value) {
+		zoomMode = value;
+		zoom = value === 'fit' ? fitZoom() : Number(value) || 1;
+		applyZoom();
+	}
+
+	function setLocked(on) {
+		locked = on;
+		const btn = $('lock-toggle');
+		if (btn) {
+			btn.classList.toggle('active', on);
+			btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+		}
+		const canvas = $('form-canvas');
+		if (canvas) canvas.classList.toggle('locked', on);
+	}
+
+	function setTabOrderMode(on) {
+		tabOrderMode = on;
+		const btn = $('taborder-toggle');
+		if (btn) {
+			btn.classList.toggle('active', on);
+			btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+		}
+		const canvas = $('form-canvas');
+		if (canvas) canvas.classList.toggle('tab-order', on);
+		renderTabBadges();
+	}
+
+	// renderTabBadges draws the number Tab will visit each control at, over
+	// the control itself. Tab order is a property of the whole form rather
+	// than of any one control, and setting it one spin box at a time in the
+	// property panel means holding the whole sequence in your head - which is
+	// the reason Visual Studio has this mode at all.
+	function renderTabBadges() {
+		for (const el of document.querySelectorAll('.tab-badge')) {
+			el.remove();
+		}
+		if (!tabOrderMode) return;
+		for (const spec of canvasControls()) {
+			const el = rendered.get(spec.id);
+			if (!el) continue;
+			const badge = document.createElement('div');
+			badge.className = 'tab-badge';
+			const idx = spec.props && spec.props.tabIndex;
+			badge.textContent = idx === undefined || idx === '' ? '–' : String(idx);
+			badge.title = `${spec.id}: tab index ${badge.textContent}`;
+			el.appendChild(badge);
+		}
+	}
+
+	// assignNextTabIndex is what a click does in tab order mode: the control
+	// clicked takes the next number in the sequence. Clicking through the
+	// form in the order you want is the whole interaction.
+	function assignNextTabIndex(spec) {
+		const used = canvasControls()
+			.map((c) => Number((c.props && c.props.tabIndex) ?? NaN))
+			.filter((n) => Number.isFinite(n));
+		const next = used.length ? Math.max(...used) + 1 : 0;
+		post({ type: 'apply', ops: [{ op: 'setProp', id: spec.id, prop: 'tabIndex', value: String(next) }] });
+	}
+
+	function wireCanvasToolbar() {
+		const zoomSelect = $('zoom-select');
+		if (zoomSelect && !zoomSelect.dataset.bound) {
+			zoomSelect.dataset.bound = '1';
+			zoomSelect.addEventListener('change', () => setZoom(zoomSelect.value));
+		}
+		const lock = $('lock-toggle');
+		if (lock && !lock.dataset.bound) {
+			lock.dataset.bound = '1';
+			lock.addEventListener('click', () => setLocked(!locked));
+		}
+		const tab = $('taborder-toggle');
+		if (tab && !tab.dataset.bound) {
+			tab.dataset.bound = '1';
+			tab.addEventListener('click', () => setTabOrderMode(!tabOrderMode));
+		}
+	}
+
 	// selectForm clears the control selection and shows the form's own
 	// properties. Several things route here, because a form covered edge to
 	// edge by a docked control has no background left to click.
@@ -424,6 +588,17 @@
 			return;
 		}
 
+		// A tray component goes nowhere in particular: it has no bounds and
+		// no container, and dropping it while a Panel happens to be selected
+		// must not try to parent it onto that panel.
+		if (desc.NonVisual) {
+			const trayId = generateId(type);
+			post({ type: 'apply', ops: [{ op: 'add', id: trayId, type }] });
+			setSelection(trayId, false);
+			showTab('properties');
+			return;
+		}
+
 		let parent = '';
 		let slot = '';
 		if (selectedId) {
@@ -503,13 +678,101 @@
 		}
 
 		const RP = globalThis.GoFormsRenderPlan;
-		const next = RP.digestAll(model.controls, (id) => pageChoice[id] || 0);
+		// The tray is rendered separately and must not reach the plan: a
+		// component has no bounds, so the plan would create an element for it
+		// and place it at 0,0 on top of the form.
+		const next = RP.digestAll(canvasControls(), (id) => pageChoice[id] || 0);
 		const plan = RP.computeRenderPlan(prevDigests, next);
 		prevDigests = next;
 		if (RP.isNoop(plan)) return;
 
 		applyRenderPlan(plan);
 		updateSelectionClasses();
+	}
+
+	// ---------------------------------------------------------------------
+	// The component tray
+	// ---------------------------------------------------------------------
+
+	// renderTray draws the strip below the form holding the components that
+	// have no appearance. Visual Studio puts them there for one reason worth
+	// repeating: they are part of the form and have properties and events
+	// like anything else, and a Timer you cannot see is a Timer you cannot
+	// select, rename, configure or delete without leaving the designer.
+	//
+	// It rebuilds wholesale rather than diffing like the canvas does: there
+	// are rarely more than a handful, they carry no listeners worth
+	// preserving, and nothing is being dragged around in here.
+	function renderTray() {
+		const host = $('component-tray');
+		const items = $('component-tray-items');
+		if (!host || !items) return;
+
+		const specs = trayControls();
+		host.hidden = specs.length === 0;
+		trayEls.clear();
+		items.innerHTML = '';
+
+		for (const spec of specs) {
+			const el = document.createElement('button');
+			el.type = 'button';
+			el.className = 'tray-item';
+			el.dataset.id = spec.id;
+
+			const icon = document.createElement('span');
+			icon.className = 'tray-icon';
+			icon.textContent = trayGlyph(spec.type);
+			el.appendChild(icon);
+
+			const name = document.createElement('span');
+			name.className = 'tray-name';
+			name.textContent = spec.id;
+			el.appendChild(name);
+
+			el.title = `${spec.type} — ${trayHint(spec)}`;
+			el.addEventListener('click', (e) => {
+				setSelection(spec.id, e.ctrlKey || e.metaKey || e.shiftKey);
+				updateSelectionClasses();
+				renderProperties();
+				showTab('properties');
+			});
+			items.appendChild(el);
+			trayEls.set(spec.id, el);
+		}
+		updateSelectionClasses();
+	}
+
+	// trayGlyph is a one-character stand-in for an icon set the extension
+	// does not ship. It only has to make the four dialogs distinguishable
+	// from each other at a glance; the name beside it does the rest.
+	function trayGlyph(type) {
+		switch (type) {
+			case 'Timer':
+				return '⏱';
+			case 'OpenFileDialog':
+				return '📂';
+			case 'SaveFileDialog':
+				return '💾';
+			case 'FolderBrowserDialog':
+				return '🗂';
+			case 'ColorDialog':
+				return '🎨';
+			default:
+				return '⚙';
+		}
+	}
+
+	// trayHint summarizes a component in the one line its tooltip has, so the
+	// state that matters most - is the timer running, and how often - is
+	// visible without selecting it.
+	function trayHint(spec) {
+		if (spec.type === 'Timer') {
+			const ms = (spec.props && spec.props.interval) || '1000';
+			const on = spec.props && spec.props.enabled === 'true';
+			return `${ms} ms, ${on ? 'started' : 'not started'}`;
+		}
+		const title = spec.props && spec.props.title;
+		return title ? `"${title}"` : 'not on the form; select it to set its properties';
 	}
 
 	function applyRenderPlan(plan) {
@@ -570,7 +833,10 @@
 	function placeChildren(key) {
 		const [parent, slot] = splitParentKey(key);
 		const host = containerElFor(parent, slot);
-		const kids = model.controls.filter((c) => parentKey(c.parent, c.parentSlot) === key);
+		// Tray components are nominally children of the Form - that is what
+		// having no parent means - but they have no element and no bounds,
+		// so the docking pass below must not try to lay them out.
+		const kids = canvasControls().filter((c) => parentKey(c.parent, c.parentSlot) === key);
 		for (const spec of kids) {
 			const el = rendered.get(spec.id);
 			if (!el) continue;
@@ -1495,6 +1761,7 @@
 				e.stopPropagation();
 				pageChoice[spec.id] = i;
 				renderCanvas();
+				renderTabBadges();
 				updateSelectionClasses();
 			});
 			strip.appendChild(tab);
@@ -1650,12 +1917,14 @@
 	// currently detached - one on a tab page other than the one being designed
 	// - is still up to date when it comes back.
 	function updateSelectionClasses() {
-		rendered.forEach((elx, id) => {
+		const mark = (elx, id) => {
 			elx.classList.toggle('selected', id === selectedId);
 			// Secondary members get a lighter outline, so it stays obvious
 			// which one the properties panel is editing.
 			elx.classList.toggle('co-selected', id !== selectedId && selectedIds.has(id));
-		});
+		};
+		rendered.forEach(mark);
+		trayEls.forEach(mark);
 	}
 
 	// ---------------------------------------------------------------------
@@ -1665,6 +1934,14 @@
 	function onCtrlMouseDown(e, spec, d) {
 		e.stopPropagation();
 		e.preventDefault();
+
+		// In tab order mode a click means "this one is next", not "select
+		// this one" - the whole point is to walk the form in sequence without
+		// the panel changing under you on every click.
+		if (tabOrderMode) {
+			assignNextTabIndex(spec);
+			return;
+		}
 
 		const additive = e.ctrlKey || e.metaKey || e.shiftKey;
 		// Dragging a control that is already part of a multi-selection moves
@@ -1681,6 +1958,13 @@
 		// Picking something on the canvas is a request to look at it, so the
 		// panel shows its properties without a second click on the tab.
 		showTab('properties');
+
+		// Locked: the click above still selected the control, which is what
+		// Lock Controls is for - inspecting a finished layout without nudging
+		// it. Only the drag is refused.
+		if (locked) {
+			return;
+		}
 
 		// Only siblings move together: children of different parents use
 		// different coordinate origins, so one shared delta would be wrong
@@ -1722,8 +2006,8 @@
 
 	function onDragMove(e) {
 		if (!dragState) return;
-		const dx = e.clientX - dragState.startClientX;
-		const dy = e.clientY - dragState.startClientY;
+		const dx = toFormPx(e.clientX - dragState.startClientX);
+		const dy = toFormPx(e.clientY - dragState.startClientY);
 		if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
 			dragState.moved = true;
 		}
@@ -1818,9 +2102,11 @@
 	function boundsWithin(el, hostEl) {
 		const r = el.getBoundingClientRect();
 		const host = hostEl.getBoundingClientRect();
+		// Both rects are measured on screen, so the difference between them is
+		// in screen pixels too and has to come back down to form pixels.
 		return {
-			x: Math.max(0, Math.round(r.left - host.left)),
-			y: Math.max(0, Math.round(r.top - host.top)),
+			x: Math.max(0, Math.round(toFormPx(r.left - host.left))),
+			y: Math.max(0, Math.round(toFormPx(r.top - host.top))),
 		};
 	}
 
@@ -1931,6 +2217,12 @@
 	function onResizeMouseDown(e, spec, d) {
 		e.stopPropagation();
 		e.preventDefault();
+		if (locked || tabOrderMode) {
+			// The handles are hidden in both modes, so this is only reachable
+			// if one is toggled on mid-drag - but a resize that still went
+			// through would be exactly the accident Lock exists to prevent.
+			return;
+		}
 		selectedId = spec.id;
 		updateSelectionClasses();
 		renderProperties();
@@ -1954,8 +2246,8 @@
 
 	function onResizeMove(e) {
 		if (!resizeState) return;
-		const dx = e.clientX - resizeState.startClientX;
-		const dy = e.clientY - resizeState.startClientY;
+		const dx = toFormPx(e.clientX - resizeState.startClientX);
+		const dy = toFormPx(e.clientY - resizeState.startClientY);
 		if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
 			resizeState.moved = true;
 		}
@@ -2002,6 +2294,9 @@
 	function onFormResizeMouseDown(e, axis) {
 		e.stopPropagation();
 		e.preventDefault();
+		if (locked) {
+			return;
+		}
 		selectForm();
 
 		formResizeState = {
@@ -2023,8 +2318,8 @@
 		// An edge grip ignores movement on the axis it does not own, so a
 		// hand that drifts while dragging the right edge cannot also change
 		// the height.
-		const dx = formResizeState.axis === 'y' ? 0 : e.clientX - formResizeState.startClientX;
-		const dy = formResizeState.axis === 'x' ? 0 : e.clientY - formResizeState.startClientY;
+		const dx = formResizeState.axis === 'y' ? 0 : toFormPx(e.clientX - formResizeState.startClientX);
+		const dy = formResizeState.axis === 'x' ? 0 : toFormPx(e.clientY - formResizeState.startClientY);
 		if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
 			formResizeState.moved = true;
 		}
@@ -2116,12 +2411,25 @@
 			return;
 		}
 
-		if (selectedIds.size > 1) {
-			appendAlignGroup(panel);
+		// A tray component has no position, no size and no container, so the
+		// three groups that edit those would all be lies. Everything below
+		// them - properties, events, delete - applies unchanged.
+		if (isComponent(spec)) {
+			const note = document.createElement('div');
+			note.className = 'hint';
+			note.style.marginBottom = '10px';
+			note.textContent =
+				'A component belongs to the form but is not on it, so it has no position or size. It is a field like any other control: rename it, set its properties, wire its events.';
+			panel.appendChild(note);
+			appendNameGroup(panel, spec);
+		} else {
+			if (selectedIds.size > 1) {
+				appendAlignGroup(panel);
+			}
+			appendNameGroup(panel, spec);
+			appendParentGroup(panel, spec);
+			appendBoundsGroup(panel, spec, false);
 		}
-		appendNameGroup(panel, spec);
-		appendParentGroup(panel, spec);
-		appendBoundsGroup(panel, spec, false);
 
 		if (desc && desc.Setters && desc.Setters.SetText !== undefined) {
 			appendTextGroup(panel, spec);
@@ -2139,12 +2447,9 @@
 			appendCollectionGroup(panel, spec, desc.Collection);
 		}
 
-		if (desc && desc.Setters) {
-			const extraProps = Object.entries(desc.Setters).filter(([, prop]) => prop !== 'text');
-			if (extraProps.length) {
-				extraProps.sort((a, b) => a[1].localeCompare(b[1]));
-				appendPropsGroup(panel, spec, extraProps, desc);
-			}
+		const editableProps = propsOf(desc);
+		if (editableProps.length) {
+			appendPropsGroup(panel, spec, editableProps, desc);
 		}
 
 		if (desc && desc.Events && desc.Events.length) {
@@ -2666,9 +2971,28 @@
 		return 'string';
 	}
 
-	function appendPropsGroup(panel, spec, extraProps, desc) {
+	// propsOf lists the editable properties of a type, whichever of the four
+	// ways the Go tool writes them it uses: a setter call, an exported field
+	// (the dialogs), a bare method standing for a bool (a Timer's Start), or
+	// a constructor argument (its interval). The panel does not care which -
+	// it sends `setProp` and the tool picks the shape - so they are one
+	// sorted list here.
+	//
+	// `text` is excluded: it has its own editor above.
+	function propsOf(desc) {
+		if (!desc) return [];
+		const props = new Set();
+		for (const prop of Object.values(desc.Setters || {})) props.add(prop);
+		for (const prop of Object.values(desc.Fields || {})) props.add(prop);
+		for (const prop of Object.keys(desc.Calls || {})) props.add(prop);
+		for (const prop of desc.CtorProps || []) props.add(prop);
+		props.delete('text');
+		return [...props].sort((a, b) => a.localeCompare(b));
+	}
+
+	function appendPropsGroup(panel, spec, props, desc) {
 		const g = groupEl('Properties');
-		for (const [, prop] of extraProps) {
+		for (const prop of props) {
 			const row = document.createElement('div');
 			row.className = 'prop-row';
 			const label = document.createElement('label');

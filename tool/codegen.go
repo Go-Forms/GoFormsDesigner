@@ -146,6 +146,12 @@ func ctorCall(spec *ControlSpec, recvVar string) (string, error) {
 		return fmt.Sprintf("goforms.NewSplitContainer(%s, %s, %s)", fnum(spec.W), fnum(spec.H), vertical), nil
 	case "ColorPickerButton":
 		return fmt.Sprintf("goforms.NewColorPickerButton(%s, %s.Form)", quote(spec.Text), recvVar), nil
+	case "Timer":
+		// One second, because a timer added from the toolbox and left alone
+		// should be visibly a timer rather than a busy loop.
+		return fmt.Sprintf("goforms.NewTimer(%s)", numOrDefault(spec, "interval", "1000")), nil
+	case "OpenFileDialog", "SaveFileDialog", "FolderBrowserDialog", "ColorDialog":
+		return fmt.Sprintf("goforms.New%s()", spec.Type), nil
 	}
 	_ = desc
 	return "", fmt.Errorf("no constructor template for %q", spec.Type)
@@ -162,15 +168,19 @@ func controlBlock(recvVar string, spec *ControlSpec, parentType, indent string) 
 	if err != nil {
 		return "", err
 	}
+	desc := catalog[spec.Type]
+	nonVisual := desc != nil && desc.NonVisual
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s%s.%s = %s\n", indent, recvVar, spec.ID, ctor)
-	fmt.Fprintf(&b, "%s%s.%s.SetBounds(%s, %s, %s, %s)\n", indent, recvVar, spec.ID, fnum(spec.X), fnum(spec.Y), fnum(spec.W), fnum(spec.H))
+	if !nonVisual {
+		fmt.Fprintf(&b, "%s%s.%s.SetBounds(%s, %s, %s, %s)\n", indent, recvVar, spec.ID, fnum(spec.X), fnum(spec.Y), fnum(spec.W), fnum(spec.H))
+	}
 
 	// Emit every prop that has a real setter, sorted for deterministic
 	// output. "text" and "items" are skipped: both are already carried by
 	// the constructor above, and emitting them again would either duplicate
 	// the value or overwrite it with a stale one.
-	desc := catalog[spec.Type]
 	props := make([]string, 0, len(spec.Props))
 	for p := range spec.Props {
 		if p == "text" || p == "items" {
@@ -190,6 +200,8 @@ func controlBlock(recvVar string, spec *ControlSpec, parentType, indent string) 
 		fmt.Fprintf(&b, "%s%s.%s.%s(%s)\n", indent, recvVar, spec.ID, method, val)
 	}
 
+	b.WriteString(fieldLines(recvVar, spec, desc, indent))
+
 	// events, sorted for deterministic output
 	names := make([]string, 0, len(spec.Events))
 	for ev := range spec.Events {
@@ -205,8 +217,69 @@ func controlBlock(recvVar string, spec *ControlSpec, parentType, indent string) 
 	// `mf.<gone>.AddButton(...)` lines behind.
 	b.WriteString(collectionLines(recvVar, spec, indent))
 
+	if nonVisual {
+		// No AddControl: a Timer is not on the form. The Start() call, if
+		// any, goes last, so everything it depends on is already set - a
+		// timer started before its Tick is wired would fire into nothing.
+		b.WriteString(callLines(recvVar, spec, desc, indent))
+		return b.String(), nil
+	}
+
 	b.WriteString(addControlLine(recvVar, spec.ID, spec.Parent, parentType, spec.ParentSlot, indent))
 	return b.String(), nil
+}
+
+// fieldLines renders the `<recv>.<id>.<Field> = <value>` statements for the
+// components configured by assignment. Only props with a real value are
+// written: a dialog whose Title is empty is a dialog with the default
+// caption, and saying so explicitly would just be noise in the file.
+func fieldLines(recvVar string, spec *ControlSpec, desc *ControlDesc, indent string) string {
+	if desc == nil || len(desc.Fields) == 0 {
+		return ""
+	}
+	props := make([]string, 0, len(spec.Props))
+	for p, v := range spec.Props {
+		if v == "" {
+			continue
+		}
+		if _, ok := fieldForProp(desc, p); ok {
+			props = append(props, p)
+		}
+	}
+	sort.Strings(props)
+
+	var b strings.Builder
+	for _, p := range props {
+		field, _ := fieldForProp(desc, p)
+		val, err := formatPropValue(desc, p, spec.Props[p])
+		if err != nil {
+			continue // an unparseable value is left out rather than written broken
+		}
+		fmt.Fprintf(&b, "%s%s.%s.%s = %s\n", indent, recvVar, spec.ID, field, val)
+	}
+	return b.String()
+}
+
+// callLines renders the no-argument methods a bool prop stands for - a
+// Timer's Start(). False emits nothing, which is already what "not started"
+// means, so there is no Stop() to write.
+func callLines(recvVar string, spec *ControlSpec, desc *ControlDesc, indent string) string {
+	if desc == nil || len(desc.Calls) == 0 {
+		return ""
+	}
+	props := make([]string, 0, len(desc.Calls))
+	for p := range desc.Calls {
+		if spec.Props[p] == "true" {
+			props = append(props, p)
+		}
+	}
+	sort.Strings(props)
+
+	var b strings.Builder
+	for _, p := range props {
+		fmt.Fprintf(&b, "%s%s.%s.%s()\n", indent, recvVar, spec.ID, desc.Calls[p])
+	}
+	return b.String()
 }
 
 // addControlLine renders the statement that parents a control, onto whichever

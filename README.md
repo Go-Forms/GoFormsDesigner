@@ -89,6 +89,11 @@ has New Form and New Theme.
 | **GoForms: New Form…** | Adds a `Forms/<Name>/` pair: the designer file and the hand-written one. |
 | **GoForms: New Theme…** | Writes `<project>-styles.go` into a project created without one, from the same starting points the wizard offers, and adds the `SetTheme` call to main(). |
 
+Components — a Timer, the four dialogs — are in the toolbox under
+**Components**, and land on the tray below the form rather than on it. They
+have properties and events like anything else; a Timer you cannot see is a
+Timer you cannot rename, configure or delete without leaving the designer.
+
 ### Editing
 
 | Command | What it does |
@@ -107,6 +112,8 @@ has New Form and New Theme.
 | --- | --- |
 | **GoForms: Run…** | Asks where — desktop, browser or Android — and does the whole thing. This is what the status bar entry runs. |
 | **GoForms: Run on Desktop** | `go run .`. Also the play button on the designer's toolbar. |
+| **GoForms: Debug** | Starts the app under Delve, so a breakpoint in a Click handler stops with the form still on screen. Also F5, and the bug icon on the designer's toolbar. |
+| **GoForms: Add Debug Configuration** | Writes the launch configurations into an existing project. New projects already have them. |
 | **GoForms: Run in Browser (WebAssembly)** | Builds for `js/wasm`, serves it on a loopback port and opens it. One step, because a browser cannot launch a `.wasm` off the disk. |
 | **GoForms: Build…** | Asks which target to build: desktop, WebAssembly or Android. |
 | **GoForms: Build for Desktop** | `go build` into `build/desktop/`. |
@@ -153,6 +160,12 @@ produces an empty form.
 - **Escape selects the form.** A form covered edge to edge by a docked control
   has no background left to click, so Escape is the way back to its own
   properties — title, width, height.
+- **Three modes sit above the canvas.** **Zoom** draws the form at 50–200%, or
+  fits it to the window; it changes nothing about the form. **Lock** still
+  lets you select and inspect but refuses every drag and resize. **Tab order**
+  numbers the controls where they sit and lets you click through the form in
+  the order you want Tab to visit them, instead of setting `tabIndex` one spin
+  box at a time.
 - **Renaming a control renames everything.** The struct field, every reference
   to it, and any handler still named after it.
 - **Ctrl or Shift click extends the selection.** Dragging any member then moves
@@ -172,6 +185,12 @@ produces an empty form.
 - **F7 and Shift+F7 move between the two halves of a form** — the layout the
   designer writes and the handlers you write — the same keys Visual Studio
   binds them to. F7 on a form with no code file yet writes it.
+- **F5 debugs.** A new project ships with the launch configurations; an
+  existing one gets them from **GoForms: Add Debug Configuration**. It needs
+  the Go extension, which supplies the debugger.
+- **The interface is available in Russian**, and follows VS Code's display
+  language — no setting of its own. The setup guides have been bilingual
+  since 0.10.0.
 - **The first run needs Go** and takes a moment: the helper that parses and
   rewrites your files is compiled then, into the extension's storage.
 - **Nothing here needs the network.** The designer, the theme editor, the

@@ -182,11 +182,16 @@ func cmdCatalog() error {
 		for p, v := range desc.Enums {
 			merged.Enums[p] = v
 		}
-		for m, p := range baseProps {
-			merged.Setters[m] = p
-			merged.Kinds[p] = basePropKinds[p]
-			if v, ok := basePropEnums[p]; ok {
-				merged.Enums[p] = v
+		// A tray component is not a ControlBase: it has no Anchor, no Dock
+		// and no tab stop, and offering them would write calls that do not
+		// compile.
+		if !desc.NonVisual {
+			for m, p := range baseProps {
+				merged.Setters[m] = p
+				merged.Kinds[p] = basePropKinds[p]
+				if v, ok := basePropEnums[p]; ok {
+					merged.Enums[p] = v
+				}
 			}
 		}
 		merged.OwnEventCount = len(desc.Events)

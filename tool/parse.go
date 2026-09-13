@@ -17,6 +17,18 @@ type pcontrol struct {
 	spec       *ControlSpec
 	blockStart token.Pos
 	blockEnd   token.Pos // set once AddControl is seen; zero until finalized
+	// lastEnd is the end of the last statement attributed to this control.
+	// A tray component has no AddControl to end its block, so this is what
+	// closes it - which also means every statement that touches one must
+	// extend it, or removing the component would leave half its setup behind.
+	lastEnd token.Pos
+	// fieldStmts spans each `<recv>.<field>.<Name> = <value>` assignment by
+	// prop name, so setProp rewrites the statement instead of appending a
+	// second assignment to the same field.
+	fieldStmts map[string]ByteRangeTok
+	// callStmts spans each no-argument call standing for a bool prop (a
+	// Timer's Start()), so turning the prop off deletes the line.
+	callStmts map[string]ByteRangeTok
 	// boundsArgs are the 4 numeric literal arg nodes of the SetBounds call,
 	// in x,y,w,h order, so apply.go can replace just their text.
 	boundsArgs []ast.Expr
@@ -304,10 +316,16 @@ func parseFile(path string) (*parseResult, error) {
 	// 4. Assemble the ordered, finalized control list.
 	for _, id := range res.order {
 		pc := res.controls[id]
-		if pc.blockEnd == token.NoPos {
+		end := pc.blockEnd
+		if isNonVisual(pc.spec.Type) {
+			// A tray component has no AddControl to end its block, so the
+			// last statement that mentioned it does.
+			end = pc.lastEnd
+		}
+		if end == token.NoPos {
 			continue // never AddControl'd - treat as not part of the form
 		}
-		pc.spec.Range = byteRange(fset, pc.blockStart, pc.blockEnd)
+		pc.spec.Range = byteRange(fset, pc.blockStart, end)
 		res.model.Controls = append(res.model.Controls, pc.spec)
 	}
 	for _, g := range res.groups {
@@ -315,7 +333,7 @@ func parseFile(path string) (*parseResult, error) {
 	}
 
 	res.model.Note = "Only the control types listed in the designer palette are recognized here; " +
-		"anything else in initializeComponent (Timer, MenuStrip, ContextMenu, Load/Closing wiring, ...) " +
+		"anything else in initializeComponent (MenuStrip, ContextMenu, ToolTip, Load/Closing wiring, ...) " +
 		"is left completely untouched by apply."
 
 	return res, nil
@@ -468,7 +486,18 @@ func (r *parseResult) visitAssign(s *ast.AssignStmt, recvVar string) {
 		return
 	}
 	lhsParts, ok := selChain(s.Lhs[0])
-	if !ok || len(lhsParts) != 2 || lhsParts[0] != recvVar {
+	if !ok || len(lhsParts) < 2 || lhsParts[0] != recvVar {
+		return
+	}
+	// `mf.dlgOpen.Title = "Open a file"` - a property written as an
+	// assignment rather than a setter call. Only the components that have no
+	// setters use this shape, so it is checked before the construction case
+	// and never competes with it.
+	if len(lhsParts) == 3 {
+		r.visitFieldAssign(s, lhsParts[1], lhsParts[2])
+		return
+	}
+	if len(lhsParts) != 2 {
 		return
 	}
 	fieldName := lhsParts[1]
@@ -505,7 +534,20 @@ func (r *parseResult) visitAssign(s *ast.AssignStmt, recvVar string) {
 		Props:     map[string]string{},
 		Events:    map[string]string{},
 	}
-	pc := &pcontrol{spec: spec, blockStart: s.Pos(), eventStmts: map[string]ByteRangeTok{}}
+	pc := &pcontrol{
+		spec:       spec,
+		blockStart: s.Pos(),
+		lastEnd:    s.End(),
+		eventStmts: map[string]ByteRangeTok{},
+		fieldStmts: map[string]ByteRangeTok{},
+		callStmts:  map[string]ByteRangeTok{},
+	}
+	if desc.NonVisual {
+		// Nothing later will finalize a tray component - there is no
+		// AddControl - so it joins the ordered list at construction, where
+		// it also gets its place in tray order.
+		r.order = append(r.order, fieldName)
+	}
 
 	switch desc.Type {
 	case "Label", "Button", "CheckBox", "RadioButton":
@@ -678,9 +720,62 @@ func (r *parseResult) visitAssign(s *ast.AssignStmt, recvVar string) {
 				pc.textArg = call.Args[0]
 			}
 		}
+	case "Timer":
+		// The interval is a constructor argument, so setProp replaces it
+		// there rather than appending an assignment to Timer.Interval - two
+		// places holding the same value is how they come to disagree.
+		if len(call.Args) >= 1 {
+			if ms, ok := litFloat(call.Args[0]); ok {
+				spec.Props["interval"] = strconv.FormatFloat(ms, 'g', -1, 64)
+				pc.setSingleArg("interval", call.Args[0])
+			}
+		}
 	}
 
 	r.controls[fieldName] = pc
+}
+
+// visitFieldAssign reads `<recv>.<field>.<Name> = <value>` - how the tray
+// components are configured, since a dialog's Title is an exported field and
+// not a SetTitle call.
+func (r *parseResult) visitFieldAssign(s *ast.AssignStmt, field, name string) {
+	pc, known := r.controls[field]
+	if !known {
+		return
+	}
+	desc := catalog[pc.spec.Type]
+	prop, ok := fieldProp(desc, name)
+	if !ok {
+		return
+	}
+	// The statement belongs to this component whether or not its value can
+	// be read back, so the block covers it either way - otherwise removing
+	// the component would leave the assignment behind, referring to a field
+	// that no longer exists.
+	pc.lastEnd = maxPos(pc.lastEnd, s.End())
+	pc.fieldStmts[prop] = ByteRangeTok{Start: s.Pos(), End: s.End()}
+	if v, ok := readPropValue(s.Rhs[0], kindOf(desc, prop)); ok {
+		pc.spec.Props[prop] = v
+		pc.setSingleArg(prop, s.Rhs[0])
+	}
+}
+
+// blockEnd is where a control's generated block stops: its AddControl call,
+// or - for a tray component, which has none - the last statement that
+// mentioned it. Everything that splices a control out of the file has to go
+// through this, or removing a Timer would delete nothing and leave the rest.
+func (pc *pcontrol) end() token.Pos {
+	if pc.blockEnd != token.NoPos {
+		return pc.blockEnd
+	}
+	return pc.lastEnd
+}
+
+func maxPos(a, b token.Pos) token.Pos {
+	if b > a {
+		return b
+	}
+	return a
 }
 
 func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
@@ -752,6 +847,7 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 			if argParts, ok := selChain(call.Args[0]); ok && len(argParts) == 2 && argParts[0] == recvVar {
 				pc.spec.Events[parts[2]] = argParts[1]
 				pc.eventStmts[parts[2]] = ByteRangeTok{Start: s.Pos(), End: s.End()}
+				pc.lastEnd = maxPos(pc.lastEnd, s.End())
 			}
 		}
 
@@ -769,12 +865,44 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 			pc.spec.Rows = append(pc.spec.Rows, row)
 		}
 
+	// mf.field.Start() - a no-argument call standing for a bool property.
+	// Checked before the setter case because a Timer has no setters at all
+	// and applySetter would just drop it, losing the statement from the
+	// block along with it.
+	case len(parts) == 3 && len(call.Args) == 0 && isCallProp(r, parts[1], parts[2]):
+		if pc, ok := r.controls[parts[1]]; ok {
+			prop, _ := setterProp(catalog[pc.spec.Type], parts[2])
+			pc.spec.Props[prop] = "true"
+			pc.callStmts[prop] = ByteRangeTok{Start: s.Pos(), End: s.End()}
+			pc.lastEnd = maxPos(pc.lastEnd, s.End())
+		}
+
 	// mf.field.SetXxx(args...)
 	case len(parts) == 3:
 		if pc, ok := r.controls[parts[1]]; ok {
 			r.applySetter(pc, parts[2], call.Args)
+			pc.lastEnd = maxPos(pc.lastEnd, s.End())
 		}
 	}
+}
+
+// isCallProp reports whether a no-argument method on this control is one of
+// the bool properties expressed as a call (a Timer's Start).
+func isCallProp(r *parseResult, field, method string) bool {
+	pc, ok := r.controls[field]
+	if !ok {
+		return false
+	}
+	desc := catalog[pc.spec.Type]
+	if desc == nil {
+		return false
+	}
+	for _, m := range desc.Calls {
+		if m == method {
+			return true
+		}
+	}
+	return false
 }
 
 // slotCall is a recognized "add into part of a container" statement, before

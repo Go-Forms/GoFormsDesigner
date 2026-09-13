@@ -278,7 +278,29 @@ function install() {
 	const app = add(root, 'app');
 	const main = add(app, 'main');
 	const canvasWrap = add(main, 'canvas-wrap');
+	const canvasToolbar = add(canvasWrap, 'canvas-toolbar');
+	const zoomSelect = new Element('select');
+	zoomSelect.id = 'zoom-select';
+	for (const v of ['0.5', '0.75', '1', '1.25', '1.5', '2', 'fit']) {
+		const opt = new Element('option');
+		opt.value = v;
+		zoomSelect.appendChild(opt);
+	}
+	zoomSelect.value = '1';
+	canvasToolbar.appendChild(zoomSelect);
+	byId.set('zoom-select', zoomSelect);
+	for (const id of ['lock-toggle', 'taborder-toggle']) {
+		const b = new Element('button');
+		b.id = id;
+		b.className = 'canvas-tool';
+		canvasToolbar.appendChild(b);
+		byId.set(id, b);
+	}
 	add(canvasWrap, 'canvas-scroll');
+	const tray = add(canvasWrap, 'component-tray');
+	tray.hidden = true;
+	add(tray, 'component-tray-label');
+	add(tray, 'component-tray-items');
 	const side = add(main, 'side-panel');
 	const tabs = add(side, 'side-tabs');
 

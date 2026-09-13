@@ -24,6 +24,31 @@ type ControlDesc struct {
 	// IsContainer marks types whose children are positioned relative to
 	// them (Panel, GroupBox) rather than to the Form.
 	IsContainer bool
+	// NonVisual marks a component that has no place on the canvas: a Timer,
+	// a file dialog. It is a field on the form like any other control, but
+	// it is never given bounds and never added to a container, so the
+	// designer shows it on the tray strip below the form the way Visual
+	// Studio does. It also inherits nothing from ControlBase - a Timer has
+	// no Anchor and no Click - which is why NonVisual suppresses the base
+	// property and event merge rather than just hiding the control.
+	NonVisual bool `json:",omitempty"`
+	// Fields maps an exported Go struct field to the JSON prop it carries,
+	// for the components configured by assignment rather than by a setter
+	// call: `mf.dlgOpen.Title = "Open"`. Setters and Fields are the same
+	// idea reached through different syntax, and a type may use both.
+	Fields map[string]string `json:",omitempty"`
+	// Calls maps a bool prop to the no-argument method that turns it on, for
+	// the WinForms properties that are a method pair here: a Timer's Enabled
+	// is Start()/Stop(), not a field. True emits the call, false emits
+	// nothing, which is what "not started" already means.
+	Calls map[string]string `json:",omitempty"`
+	// CtorProps names the props the constructor itself carries, so there is
+	// no setter or field to write them with - setProp replaces the argument
+	// in place instead. Declaring them matters twice: the "every kind has a
+	// writer" test would otherwise flag them as unwritable, and codegen must
+	// not also emit a field assignment for a value the constructor already
+	// has.
+	CtorProps []string `json:",omitempty"`
 	// Slots names the sub-containers a type exposes as accessor methods
 	// rather than taking children itself: a SplitContainer has no AddControl
 	// of its own, its halves do, so a child is added with
@@ -150,6 +175,11 @@ func eventArgType(desc *ControlDesc, event string) (string, bool) {
 				return "EventArgs", true
 			}
 		}
+		if desc.NonVisual {
+			// A Timer is not a ControlBase and has no Click to wire; saying
+			// it does would generate a stub that does not compile.
+			return "", false
+		}
 	}
 	if t, ok := baseEvents[event]; ok {
 		return t, true
@@ -163,6 +193,9 @@ func allEventsFor(desc *ControlDesc) []string {
 	var out []string
 	if desc != nil {
 		out = append(out, desc.Events...)
+		if desc.NonVisual {
+			return out
+		}
 	}
 	return append(out, baseEventOrder...)
 }
@@ -174,9 +207,12 @@ const (
 	CategoryContainers = "Containers"
 	CategoryMenus      = "Menus & Toolbars"
 	CategoryData       = "Data"
+	// CategoryComponents holds the types with no appearance - a Timer, the
+	// dialogs. They land on the tray below the form rather than on it.
+	CategoryComponents = "Components"
 )
 
-var categoryOrder = []string{CategoryCommon, CategoryContainers, CategoryMenus, CategoryData}
+var categoryOrder = []string{CategoryCommon, CategoryContainers, CategoryMenus, CategoryData, CategoryComponents}
 
 // PropKind names the value types Kinds may use.
 const (
@@ -246,6 +282,9 @@ func setterForProp(desc *ControlDesc, prop string) (method string, ok bool) {
 				return m, true
 			}
 		}
+		if desc.NonVisual {
+			return "", false
+		}
 	}
 	for m, p := range baseProps {
 		if p == prop {
@@ -253,6 +292,69 @@ func setterForProp(desc *ControlDesc, prop string) (method string, ok bool) {
 		}
 	}
 	return "", false
+}
+
+// fieldForProp is setterForProp's counterpart for the components configured
+// by assignment: which exported field carries this prop.
+func fieldForProp(desc *ControlDesc, prop string) (field string, ok bool) {
+	if desc == nil {
+		return "", false
+	}
+	for f, p := range desc.Fields {
+		if p == prop {
+			return f, true
+		}
+	}
+	return "", false
+}
+
+// callForProp reports the no-argument method a bool prop turns into, e.g. a
+// Timer's enabled -> Start.
+func callForProp(desc *ControlDesc, prop string) (method string, ok bool) {
+	if desc == nil {
+		return "", false
+	}
+	method, ok = desc.Calls[prop]
+	return
+}
+
+// isCtorProp reports whether the constructor is where this prop lives.
+func isCtorProp(desc *ControlDesc, prop string) bool {
+	if desc == nil {
+		return false
+	}
+	for _, p := range desc.CtorProps {
+		if p == prop {
+			return true
+		}
+	}
+	return false
+}
+
+// writerForProp reports whether a prop can be written back at all, and how.
+// Every prop the designer offers must have exactly one answer here; a prop
+// with none would show an editor that silently does nothing.
+func writerForProp(desc *ControlDesc, prop string) (how string, ok bool) {
+	if _, ok := setterForProp(desc, prop); ok {
+		return "setter", true
+	}
+	if _, ok := fieldForProp(desc, prop); ok {
+		return "field", true
+	}
+	if _, ok := callForProp(desc, prop); ok {
+		return "call", true
+	}
+	if isCtorProp(desc, prop) {
+		return "constructor argument", true
+	}
+	return "", false
+}
+
+// isNonVisual reports whether a type belongs on the tray rather than the
+// canvas. It takes the type name because most callers have only that.
+func isNonVisual(typ string) bool {
+	desc, ok := catalog[typ]
+	return ok && desc.NonVisual
 }
 
 // catalog is keyed by ControlDesc.Type.
@@ -482,7 +584,45 @@ var catalog = map[string]*ControlDesc{
 		Setters: map[string]string{"SetDialogTitle": "dialogTitle"},
 		Events:  []string{"ColorChanged"},
 	},
+
+	// The tray. These have no bounds and are never added to a container;
+	// everything about them is the constructor, a few field assignments and,
+	// for the Timer, an event.
+	"Timer": {
+		Type: "Timer", Ctors: []string{"NewTimer"}, NonVisual: true,
+		// Interval is both a constructor argument and an exported field.
+		// Writing it twice with the same value is how the two come to
+		// disagree, so the constructor is the single place it lives.
+		CtorProps: []string{"interval"},
+		Kinds:     map[string]string{"interval": KindNumber, "enabled": KindBool},
+		Calls:     map[string]string{"enabled": "Start"},
+		Events:    []string{"Tick"},
+	},
+	"OpenFileDialog": {
+		Type: "OpenFileDialog", Ctors: []string{"NewOpenFileDialog"}, NonVisual: true,
+		Fields: map[string]string{"Title": "title", "InitialDirectory": "initialDirectory"},
+	},
+	"SaveFileDialog": {
+		Type: "SaveFileDialog", Ctors: []string{"NewSaveFileDialog"}, NonVisual: true,
+		Fields: map[string]string{
+			"Title": "title", "InitialDirectory": "initialDirectory",
+			"DefaultFileName": "defaultFileName",
+		},
+	},
+	"FolderBrowserDialog": {
+		Type: "FolderBrowserDialog", Ctors: []string{"NewFolderBrowserDialog"}, NonVisual: true,
+		Fields: map[string]string{"Title": "title", "InitialDirectory": "initialDirectory"},
+	},
+	"ColorDialog": {
+		Type: "ColorDialog", Ctors: []string{"NewColorDialog"}, NonVisual: true,
+		Fields: map[string]string{"Title": "title", "Message": "message"},
+	},
 }
+
+// Filter is deliberately absent from the dialog entries above: it is a
+// FileDialogFilter struct, not a scalar, and a property grid that could only
+// write half of it would be worse than one that leaves the whole thing to
+// hand-written code - which the tidy pass does not touch.
 
 // controlCategory names the toolbox group of every type that isn't a plain
 // control. Keeping only the exceptions here - rather than a Category on all
@@ -505,6 +645,12 @@ var controlCategory = map[string]string{
 	"DataGridView": CategoryData,
 	"ListView":     CategoryData,
 	"TreeView":     CategoryData,
+
+	"Timer":               CategoryComponents,
+	"OpenFileDialog":      CategoryComponents,
+	"SaveFileDialog":      CategoryComponents,
+	"FolderBrowserDialog": CategoryComponents,
+	"ColorDialog":         CategoryComponents,
 }
 
 // init fills in each type's Category so the catalog command has it without
@@ -636,8 +782,28 @@ func setterProp(desc *ControlDesc, method string) (prop string, ok bool) {
 		if prop, ok = desc.Setters[method]; ok {
 			return prop, true
 		}
+		if desc.NonVisual {
+			// Start() on a Timer reads back as enabled=true; there is no
+			// ControlBase setter to fall through to.
+			for p, m := range desc.Calls {
+				if m == method {
+					return p, true
+				}
+			}
+			return "", false
+		}
 	}
 	prop, ok = baseProps[method]
+	return
+}
+
+// fieldProp is setterProp for assignment-configured components: which prop a
+// `<recv>.<field>.<Name> = ...` statement writes.
+func fieldProp(desc *ControlDesc, field string) (prop string, ok bool) {
+	if desc == nil {
+		return "", false
+	}
+	prop, ok = desc.Fields[field]
 	return
 }
 
