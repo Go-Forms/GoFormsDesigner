@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.1
+
+Edit verion in templates: v0.1.0 -> v0.2.0
+
 ## 0.12.0
 
 Four things the designer could not do at all, rather than four things it did
