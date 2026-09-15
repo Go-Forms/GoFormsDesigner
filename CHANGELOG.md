@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.12.1
+## 0.12.2
 
 Edit verion in templates: v0.1.0 -> v0.2.0
 
