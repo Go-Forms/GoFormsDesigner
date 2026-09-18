@@ -145,6 +145,8 @@ func planOp(r *parseResult, op Op) ([]edit, error) {
 		return one(planSetItems(r, op))
 	case "setCollection":
 		return planSetCollection(r, op)
+	case "setColumns":
+		return planSetColumns(r, op)
 	case "setProp":
 		return one(planSetProp(r, op))
 	case "setEvent":
@@ -336,6 +338,65 @@ func planSetCollection(r *parseResult, op Op) ([]edit, error) {
 	start, end := wholeLines(r.src, firstStart, offset(r.fset, first.End))
 	edits := []edit{{start, end, collectionLines(r.model.RecvVar, &next, leadingIndent(r.src, firstStart))}}
 	for _, st := range pc.collectionStmts[1:] {
+		edits = addLineDelete(edits, r.src, offset(r.fset, st.Start), offset(r.fset, st.End))
+	}
+	return edits, nil
+}
+
+// planSetColumns rewrites a DataGridView's whole column table: the titles in
+// the constructor and the indexed per-column setters after it.
+//
+// Titles and the rest are two different places in the file - a constructor
+// argument list and a run of statements - which is why this is its own op
+// rather than setItems plus setProp. Editing them separately could leave a
+// column configured by index after the column at that index had gone.
+func planSetColumns(r *parseResult, op Op) ([]edit, error) {
+	pc, err := mustControl(r, op.ID)
+	if err != nil {
+		return nil, err
+	}
+	if pc.spec.Type != "DataGridView" {
+		return nil, fmt.Errorf("control type %q has no columns", pc.spec.Type)
+	}
+	if len(op.Columns) == 0 {
+		return nil, fmt.Errorf("a grid with no columns would render as an empty box; keep at least one")
+	}
+
+	// 1. The titles, in the constructor's argument list.
+	if pc.itemsRange == nil {
+		return nil, fmt.Errorf("could not locate %q's column titles to replace", op.ID)
+	}
+	titles := make([]string, len(op.Columns))
+	for i, c := range op.Columns {
+		titles[i] = quote(c.Title)
+	}
+	edits := []edit{{
+		offset(r.fset, pc.itemsRange.Start),
+		offset(r.fset, pc.itemsRange.End),
+		strings.Join(titles, ", "),
+	}}
+
+	// 2. The per-column setters. The new set replaces the first existing
+	// call and the rest are deleted, the same way planSetCollection works and
+	// for the same reason: an unrelated statement between two of them must
+	// not be swallowed.
+	next := *pc.spec
+	next.Columns = op.Columns
+	lines := columnLines(r.model.RecvVar, &next, "\t")
+
+	if len(pc.columnStmts) == 0 {
+		if lines == "" {
+			return edits, nil // nothing to write and nothing to remove
+		}
+		insertAt, indent := beforeAddControlLine(r, pc)
+		return append(edits, edit{insertAt, insertAt, columnLines(r.model.RecvVar, &next, indent)}), nil
+	}
+
+	first := pc.columnStmts[0]
+	firstStart := offset(r.fset, first.Start)
+	start, end := wholeLines(r.src, firstStart, offset(r.fset, first.End))
+	edits = append(edits, edit{start, end, columnLines(r.model.RecvVar, &next, leadingIndent(r.src, firstStart))})
+	for _, st := range pc.columnStmts[1:] {
 		edits = addLineDelete(edits, r.src, offset(r.fset, st.Start), offset(r.fset, st.End))
 	}
 	return edits, nil

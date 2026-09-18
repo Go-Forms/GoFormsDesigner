@@ -48,6 +48,11 @@ type pcontrol struct {
 	// addCtlRange spans the AddControl statement itself, which is the one
 	// line "setParent" rewrites to move a control into another container.
 	addCtlRange ByteRangeTok
+	// columnStmts spans each indexed per-column setter -
+	// SetColumnKind/SetColumnHidden/SetColumnButtonText - in file order, so
+	// "setColumns" can rewrite the whole set the way setCollection rewrites
+	// an item list.
+	columnStmts []ByteRangeTok
 	// groupAddRange spans the `<recv>.<group>.Add(<recv>.<this>)` statement
 	// enrolling this control in a radio group, if there is one. It sits
 	// outside the control's block (the group is declared separately), so
@@ -151,6 +156,67 @@ func litFloat(e ast.Expr) (float64, bool) {
 		return 0, false
 	}
 	return f, true
+}
+
+// syncGridColumns lines a grid's Columns up with its Items, so the designer
+// can edit one table instead of two lists that have to be kept in step.
+//
+// The titles come from the constructor and everything else from indexed
+// setters, and either can outrun the other: a file may set a property on a
+// column the constructor never named, or name columns nothing was ever set
+// on. Both are real, so the list grows to whichever is longer, and the title
+// is the one the constructor gave.
+func syncGridColumns(spec *ControlSpec) {
+	if spec.Type != "DataGridView" {
+		return
+	}
+	n := len(spec.Items)
+	if len(spec.Columns) > n {
+		n = len(spec.Columns)
+	}
+	if n == 0 {
+		return
+	}
+	cols := make([]GridColumnSpec, n)
+	copy(cols, spec.Columns)
+	for i := range cols {
+		if i < len(spec.Items) {
+			cols[i].Title = spec.Items[i]
+		}
+	}
+	spec.Columns = cols
+}
+
+// litInt reads a plain integer literal - the index of an indexed setter,
+// which is always written as a literal by anything this tool generates.
+func litInt(e ast.Expr) (int, bool) {
+	bl, ok := e.(*ast.BasicLit)
+	if !ok || bl.Kind != token.INT {
+		return 0, false
+	}
+	n, err := strconv.Atoi(bl.Value)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+func litBool(e ast.Expr) (bool, bool) {
+	id, ok := e.(*ast.Ident)
+	if !ok || (id.Name != "true" && id.Name != "false") {
+		return false, false
+	}
+	return id.Name == "true", true
+}
+
+// qualifiedName reads `goforms.GridColumnButton` back as "GridColumnButton" -
+// the same round-trip readPropValue does for an enum property.
+func qualifiedName(e ast.Expr) (string, bool) {
+	parts, ok := selChain(e)
+	if !ok || len(parts) == 0 {
+		return "", false
+	}
+	return parts[len(parts)-1], true
 }
 
 func offset(fset *token.FileSet, p token.Pos) int {
@@ -332,6 +398,7 @@ func parseFile(path string) (*parseResult, error) {
 			continue // never AddControl'd - treat as not part of the form
 		}
 		pc.spec.Range = byteRange(fset, pc.blockStart, end)
+		syncGridColumns(pc.spec)
 		res.model.Controls = append(res.model.Controls, pc.spec)
 	}
 	for _, g := range res.groups {
@@ -884,11 +951,66 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 			pc.lastEnd = maxPos(pc.lastEnd, s.End())
 		}
 
+	// mf.field.SetColumnKind(2, goforms.GridColumnButton) and friends - an
+	// indexed setter, so it says something different on every call and
+	// cannot go through applySetter, which models one value per property.
+	case len(parts) == 3 && isColumnSetter(parts[2]):
+		if pc, ok := r.controls[parts[1]]; ok {
+			r.applyColumnSetter(pc, parts[2], call.Args)
+			pc.columnStmts = append(pc.columnStmts, ByteRangeTok{Start: s.Pos(), End: s.End()})
+			pc.lastEnd = maxPos(pc.lastEnd, s.End())
+		}
+
 	// mf.field.SetXxx(args...)
 	case len(parts) == 3:
 		if pc, ok := r.controls[parts[1]]; ok {
 			r.applySetter(pc, parts[2], call.Args)
 			pc.lastEnd = maxPos(pc.lastEnd, s.End())
+		}
+	}
+}
+
+// isColumnSetter reports whether a method is one of DataGridView's indexed
+// per-column setters.
+func isColumnSetter(method string) bool {
+	switch method {
+	case "SetColumnKind", "SetColumnHidden", "SetColumnButtonText":
+		return true
+	}
+	return false
+}
+
+// applyColumnSetter folds one indexed per-column call into the control's
+// Columns list, growing it as needed. A call naming a column the constructor
+// never created is kept anyway: the list is rewritten from this model, so
+// dropping it would silently delete the user's line.
+func (r *parseResult) applyColumnSetter(pc *pcontrol, method string, args []ast.Expr) {
+	if len(args) != 2 {
+		return
+	}
+	idx, ok := litInt(args[0])
+	if !ok || idx < 0 || idx > 512 { // a bound, so a typo cannot allocate the world
+		return
+	}
+	for len(pc.spec.Columns) <= idx {
+		pc.spec.Columns = append(pc.spec.Columns, GridColumnSpec{})
+	}
+	col := &pc.spec.Columns[idx]
+	switch method {
+	case "SetColumnKind":
+		if name, ok := qualifiedName(args[1]); ok {
+			col.Kind = strings.TrimPrefix(name, "GridColumn")
+			if col.Kind == "Text" {
+				col.Kind = "" // the default, spelled the way the model spells it
+			}
+		}
+	case "SetColumnHidden":
+		if v, ok := litBool(args[1]); ok {
+			col.Hidden = v
+		}
+	case "SetColumnButtonText":
+		if v, ok := litString(args[1]); ok {
+			col.ButtonText = v
 		}
 	}
 }

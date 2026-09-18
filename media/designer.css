@@ -697,6 +697,27 @@ body {
 	border-right: 1px solid rgba(127, 127, 127, 0.12);
 }
 
+/* A button column's cell. Drawn as a button rather than as its text so the
+   canvas says what the column *is* at a glance, the way the running grid
+   does (see GridColumnButton in datagridview.go). */
+.cc-grid-cellbtn {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	text-align: center;
+	padding: 1px 4px;
+	margin: 2px 0;
+	border: 1px solid var(--vscode-button-border, rgba(127, 127, 127, 0.5));
+	border-radius: 2px;
+	background: var(--vscode-button-secondaryBackground, rgba(127, 127, 127, 0.15));
+	color: var(--vscode-button-secondaryForeground, inherit);
+}
+
+.cc-grid-cellcheck {
+	justify-content: center;
+}
+
 /* Frozen columns stay put while the rest scroll, so mark them. */
 .cc-grid-frozen {
 	background: var(--vscode-list-inactiveSelectionBackground, rgba(127, 127, 127, 0.1));
@@ -1225,6 +1246,19 @@ body {
 	flex: 0 1 40%;
 	font-size: 11px;
 	opacity: 0.85;
+}
+
+/* A grid column's kind. Narrow on purpose: the caption is what the eye
+   scans down, and the three kinds are recognisable at a glance. */
+.coll-row .coll-kind {
+	flex: 0 0 auto;
+	max-width: 90px;
+	font-size: 11px;
+	background: var(--vscode-dropdown-background, transparent);
+	color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+	border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #555));
+	border-radius: 2px;
+	padding: 1px 2px;
 }
 
 .coll-sep-label {

@@ -28,6 +28,27 @@ type CollectionItem struct {
 	Depth int `json:"depth,omitempty"`
 }
 
+// GridColumnSpec is one DataGridView column as the designer edits it: the
+// header caption plus the three things that are not caption.
+//
+// The caption lives in the constructor (`NewDataGridView("ID", "Name")`) and
+// the rest in indexed setter calls after it, which is why this mirrors Items
+// position for position rather than carrying an index of its own - the index
+// *is* the position.
+type GridColumnSpec struct {
+	Title string `json:"title"`
+	// Kind is "" for an ordinary text column, or "Button"/"CheckBox". It is
+	// the GridColumnKind constant's name without the "GridColumn" prefix,
+	// so the generated call reads goforms.GridColumnButton.
+	Kind string `json:"kind,omitempty"`
+	// Hidden keeps the column's data without drawing it - the id a row was
+	// loaded by. See GoForms/datagridview.go.
+	Hidden bool `json:"hidden,omitempty"`
+	// ButtonText is the fixed caption on a button column's buttons. Empty
+	// means each cell's own value is its caption.
+	ButtonText string `json:"buttonText,omitempty"`
+}
+
 // ControlSpec is one recognized control instance.
 type ControlSpec struct {
 	ID     string `json:"id"`     // Go field name, e.g. "btnGreet"
@@ -60,8 +81,14 @@ type ControlSpec struct {
 	// hanging off an unknown variable). Rewriting the list would silently
 	// drop that code, so the designer must show the collection but refuse to
 	// edit it.
-	CollectionReadOnly bool              `json:"collectionReadOnly,omitempty"`
-	Props              map[string]string `json:"props,omitempty"`
+	CollectionReadOnly bool `json:"collectionReadOnly,omitempty"`
+	// Columns is a DataGridView's per-column configuration beyond the titles
+	// (which are Items, because they are constructor arguments). It is read
+	// from the indexed `SetColumnKind`/`SetColumnHidden`/`SetColumnButtonText`
+	// calls and rewritten wholesale by the "setColumns" op. Its length always
+	// matches Items, so the two can be edited as one table.
+	Columns []GridColumnSpec  `json:"columns,omitempty"`
+	Props   map[string]string `json:"props,omitempty"`
 	// Events maps event name (e.g. "Click") to the handler method name
 	// already wired via `<recv>.<field>.<Event>.Handle(<recv>.<method>)`.
 	// Empty/absent means not wired yet.
@@ -117,7 +144,7 @@ type FormModel struct {
 
 // Op is one mutation requested by the extension via `apply`.
 type Op struct {
-	Op string `json:"op"` // "setBounds" | "setText" | "setItems" | "setCollection" | "setProp" | "setEvent" | "add" | "remove" | "setParent" | "setForm" | "rename"
+	Op string `json:"op"` // "setBounds" | "setText" | "setItems" | "setCollection" | "setColumns" | "setProp" | "setEvent" | "add" | "remove" | "setParent" | "setForm" | "rename"
 	// ID is unused (leave empty) for "setForm", which resizes the Form
 	// itself (W/H) rather than a specific control.
 	ID     string `json:"id"`
@@ -136,7 +163,10 @@ type Op struct {
 	// replaces the control's existing one rather than merging, so a delete is
 	// just a shorter list.
 	Collection []CollectionItem `json:"collection,omitempty"`
-	Prop       string           `json:"prop,omitempty"`
+	// Columns is the complete new column list for "setColumns", replacing
+	// both the constructor's titles and the indexed setter calls after it.
+	Columns []GridColumnSpec `json:"columns,omitempty"`
+	Prop    string           `json:"prop,omitempty"`
 	// Value is the property value for "setProp", and the *new name* for
 	// "rename".
 	Value   string `json:"value,omitempty"`

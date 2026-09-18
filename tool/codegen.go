@@ -216,6 +216,7 @@ func controlBlock(recvVar string, spec *ControlSpec, parentType, indent string) 
 	// planRemove deletes - otherwise removing the control would leave orphan
 	// `mf.<gone>.AddButton(...)` lines behind.
 	b.WriteString(collectionLines(recvVar, spec, indent))
+	b.WriteString(columnLines(recvVar, spec, indent))
 
 	if nonVisual {
 		// No AddControl: a Timer is not on the form. The Start() call, if
@@ -348,6 +349,32 @@ func collectionLines(recvVar string, spec *ControlSpec, indent string) string {
 			continue
 		}
 		fmt.Fprintf(&b, "%s%s.%s.%s(%s)\n", indent, recvVar, spec.ID, cd.Method, quote(item.Text))
+	}
+	return b.String()
+}
+
+// columnLines renders a DataGridView's per-column configuration as the
+// indexed setter calls parse.go reads back. Only what differs from the
+// default is written: a plain visible text column is what the constructor
+// already produced, and saying so again would be three lines of noise per
+// column.
+func columnLines(recvVar string, spec *ControlSpec, indent string) string {
+	if spec.Type != "DataGridView" {
+		return ""
+	}
+	var b strings.Builder
+	for i, c := range spec.Columns {
+		if c.Kind != "" {
+			fmt.Fprintf(&b, "%s%s.%s.SetColumnKind(%d, goforms.GridColumn%s)\n", indent, recvVar, spec.ID, i, c.Kind)
+		}
+		// A caption only means anything on a button column, so it follows the
+		// kind rather than being written for a column that cannot show it.
+		if c.Kind == "Button" && c.ButtonText != "" {
+			fmt.Fprintf(&b, "%s%s.%s.SetColumnButtonText(%d, %s)\n", indent, recvVar, spec.ID, i, quote(c.ButtonText))
+		}
+		if c.Hidden {
+			fmt.Fprintf(&b, "%s%s.%s.SetColumnHidden(%d, true)\n", indent, recvVar, spec.ID, i)
+		}
 	}
 	return b.String()
 }

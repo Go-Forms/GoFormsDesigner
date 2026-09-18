@@ -1432,10 +1432,60 @@
 		});
 	}
 
+	// gridDrawnColumns is the canvas's half of DataGridView.rebuildShown: the
+	// columns that are actually on screen, carrying what each one draws as.
+	// A hidden column is absent here exactly as it is absent from the running
+	// grid, so the preview does not show a column the form will not.
+	function gridDrawnColumns(spec) {
+		const declared =
+			spec.columns && spec.columns.length
+				? spec.columns
+				: (spec.items || []).map((t) => ({ title: t }));
+		const out = [];
+		declared.forEach((c, index) => {
+			if (c.hidden) return;
+			out.push({ index, title: c.title || '', kind: c.kind || '', buttonText: c.buttonText || '' });
+		});
+		return out;
+	}
+
+	// fillGridCell draws one cell as whatever its column says it is, mirroring
+	// DataGridView.updateCell. A button column's caption is its own when it
+	// has one and the cell's value otherwise, which is the whole point of
+	// leaving ButtonText empty.
+	function fillGridCell(cell, column, value) {
+		const kind = (column && column.kind) || '';
+		if (kind === 'Button') {
+			const btn = document.createElement('span');
+			btn.className = 'cc-grid-cellbtn';
+			btn.textContent = (column.buttonText || value || '').trim() || '…';
+			cell.appendChild(btn);
+			return;
+		}
+		if (kind === 'CheckBox') {
+			cell.classList.add('cc-grid-cellcheck');
+			cell.textContent = String(value).trim() === 'true' ? '☑' : '☐';
+			return;
+		}
+		cell.textContent = value;
+	}
+
 	function renderDataGridView(spec) {
-		const cols = spec.items && spec.items.length ? spec.items : ['Column 1', 'Column 2', 'Column 3'];
+		let drawn = gridDrawnColumns(spec);
+		// A grid nobody has given columns yet draws as an empty box, which
+		// reads as a broken drop rather than a new control - so it gets
+		// placeholders. A grid whose columns are all hidden is a different
+		// thing: that is what the form will really show.
+		if (!drawn.length && !(spec.columns && spec.columns.length) && !(spec.items && spec.items.length)) {
+			drawn = ['Column 1', 'Column 2', 'Column 3'].map((title, index) => ({ title, index, kind: '', buttonText: '' }));
+		}
+		const cols = drawn.map((c) => c.title);
 		const realRows = spec.rows || [];
-		const rows = realRows.length ? realRows : gridSampleRows(cols.length);
+		// Row data is indexed by *column*, not by drawn position, so a hidden
+		// column ahead of another must not shift its cells.
+		const rows = realRows.length
+			? realRows.map((r) => drawn.map((c) => (c.index < r.length ? r[c.index] : '')))
+			: gridSampleRows(cols.length);
 		const isSample = realRows.length === 0;
 
 		const showHeader = propOr(spec, 'showHeader', 'true') !== 'false';
@@ -1484,7 +1534,7 @@
 				const cell = document.createElement('div');
 				cell.className = 'cc-grid-cell';
 				if (i < frozen) cell.classList.add('cc-grid-frozen');
-				cell.textContent = i < row.length ? row[i] : '';
+				fillGridCell(cell, drawn[i], i < row.length ? row[i] : '');
 				rowEl.appendChild(cell);
 			}
 			table.appendChild(rowEl);
@@ -2439,7 +2489,9 @@
 		// the same editor serves both - only the label differs.
 		if (spec.type === 'ComboBox' || spec.type === 'ListBox') {
 			appendItemsGroup(panel, spec, 'Items');
-		} else if (spec.type === 'ListView' || spec.type === 'DataGridView') {
+		} else if (spec.type === 'DataGridView') {
+			appendColumnsGroup(panel, spec);
+		} else if (spec.type === 'ListView') {
 			appendItemsGroup(panel, spec, 'Columns');
 		}
 
@@ -2727,6 +2779,165 @@
 		hint.textContent = 'One item per line.';
 		g.appendChild(hint);
 		panel.appendChild(g);
+	}
+
+	// ---------------------------------------------------------------------
+	// Column editor (DataGridView)
+	// ---------------------------------------------------------------------
+	//
+	// A grid's columns are the one list whose entries carry more than a
+	// caption: each one is also a *kind* (text, button, checkbox) and may be
+	// hidden - a column that holds the id a row was loaded by without being
+	// drawn. That does not fit the plain one-per-line Items editor, and it is
+	// not a CollectionDesc either, because the titles live in the constructor
+	// and the rest in indexed setters after it. So it has its own editor and
+	// its own op, which rewrites both places at once.
+
+	const COLUMN_KINDS = [
+		{ value: '', label: 'Text' },
+		{ value: 'Button', label: 'Button' },
+		{ value: 'CheckBox', label: 'Checkbox' },
+	];
+
+	function appendColumnsGroup(panel, spec) {
+		const g = groupEl('Columns');
+		// Edits are staged against a local copy and sent as one setColumns -
+		// the tool rewrites the whole table every time, so there is no partial
+		// state to keep in sync. Same shape as the collection editor.
+		const columns = (spec.columns || []).map((c) => Object.assign({}, c));
+		if (!columns.length) {
+			(spec.items || []).forEach((t) => columns.push({ title: t }));
+		}
+
+		const commit = () => {
+			post({ type: 'apply', ops: [{ op: 'setColumns', id: spec.id, columns }] });
+		};
+
+		const list = document.createElement('div');
+		list.className = 'coll-list';
+		columns.forEach((_, i) => list.appendChild(buildColumnRow(spec, columns, i, commit)));
+		g.appendChild(list);
+
+		const add = document.createElement('button');
+		add.className = 'coll-add';
+		add.textContent = '+ Column';
+		add.addEventListener('click', () => {
+			columns.push({ title: 'Column ' + (columns.length + 1) });
+			commit();
+		});
+		g.appendChild(add);
+
+		const hint = document.createElement('div');
+		hint.className = 'hint';
+		hint.textContent =
+			'A button column reports presses through CellButtonClick; an empty caption uses each cell’s own value. ' +
+			'A hidden column keeps its data — read it with Cell(row, col).';
+		g.appendChild(hint);
+
+		panel.appendChild(g);
+	}
+
+	function buildColumnRow(spec, columns, i, commit) {
+		const col = columns[i];
+		const row = document.createElement('div');
+		row.className = 'coll-row';
+		row.draggable = true;
+
+		const grip = document.createElement('span');
+		grip.className = 'coll-grip';
+		grip.textContent = '⠿';
+		row.appendChild(grip);
+
+		const title = document.createElement('input');
+		title.type = 'text';
+		title.className = 'coll-text';
+		title.value = col.title || '';
+		title.title = 'Header caption';
+		title.addEventListener('change', () => {
+			col.title = title.value;
+			commit();
+		});
+		title.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') title.blur();
+		});
+		row.appendChild(title);
+
+		const kind = document.createElement('select');
+		kind.className = 'coll-kind';
+		kind.title = 'What the cells in this column are';
+		COLUMN_KINDS.forEach((k) => {
+			const o = document.createElement('option');
+			o.value = k.value;
+			o.textContent = k.label;
+			kind.appendChild(o);
+		});
+		kind.value = col.kind || '';
+		kind.addEventListener('change', () => {
+			col.kind = kind.value;
+			if (col.kind !== 'Button') {
+				// A caption means nothing on a column that draws no button,
+				// and keeping it would write a line the grid ignores.
+				delete col.buttonText;
+			}
+			commit();
+		});
+		row.appendChild(kind);
+
+		if (col.kind === 'Button') {
+			const caption = document.createElement('input');
+			caption.type = 'text';
+			caption.className = 'coll-handler';
+			caption.value = col.buttonText || '';
+			caption.placeholder = 'cell value';
+			caption.title = 'Caption on every button in this column; empty uses each cell’s own value.';
+			caption.addEventListener('change', () => {
+				col.buttonText = caption.value.trim();
+				commit();
+			});
+			caption.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') caption.blur();
+			});
+			row.appendChild(caption);
+		}
+
+		row.appendChild(
+			iconButton(col.hidden ? '🚫' : '👁', col.hidden ? 'Hidden: shown in code only' : 'Visible', () => {
+				col.hidden = !col.hidden;
+				commit();
+			})
+		);
+		row.appendChild(
+			iconButton('⌫', 'Delete this column', () => {
+				if (columns.length <= 1) return; // a grid with no columns is an empty box
+				columns.splice(i, 1);
+				commit();
+			})
+		);
+
+		// Reordering by drag, exactly as the collection editor does it.
+		row.addEventListener('dragstart', (e) => {
+			e.dataTransfer.setData('text/plain', String(i));
+			e.dataTransfer.effectAllowed = 'move';
+			row.classList.add('dragging');
+		});
+		row.addEventListener('dragend', () => row.classList.remove('dragging'));
+		row.addEventListener('dragover', (e) => {
+			e.preventDefault();
+			e.dataTransfer.dropEffect = 'move';
+			row.classList.add('drop-target');
+		});
+		row.addEventListener('dragleave', () => row.classList.remove('drop-target'));
+		row.addEventListener('drop', (e) => {
+			e.preventDefault();
+			row.classList.remove('drop-target');
+			const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+			if (isNaN(from) || from === i) return;
+			const [moved] = columns.splice(from, 1);
+			columns.splice(i, 0, moved);
+			commit();
+		});
+
+		return row;
 	}
 
 	// ---------------------------------------------------------------------

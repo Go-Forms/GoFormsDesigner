@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.12.4
+
+Grid columns, in the designer.
+
+Framework v0.3.0 gave a `DataGridView` column a *kind* - text, button or
+checkbox - and let a column carry data without being drawn. The designer still
+saw a grid as a flat list of captions, so none of it was reachable without
+leaving for the text editor.
+
+Columns now have their own editor rather than sharing the one-per-line Items
+box: a row each, with the caption, a kind, a visibility toggle, and - for a
+button column - the caption its buttons carry. Leaving that empty uses each
+cell's own value, which is what lets one column say "Approve" on one row and
+"Revoke" on the next. Rows reorder by dragging, as collections do.
+
+The canvas follows: a hidden column is not drawn, a button column draws
+buttons and a checkbox column draws ticks. Row data stays indexed by column,
+so hiding one does not shift the cells of the columns after it - on the canvas
+or at runtime.
+
+Hiding is a runtime property too, not only a design-time one:
+
+```go
+mf.grdOrders.SetColumnHidden(0, true)       // and false to bring it back
+hidden := mf.grdOrders.ColumnHidden(0)
+id := mf.grdOrders.Cell(row, 0)             // still readable while hidden
+col := mf.grdOrders.ColumnByName("ID")      // find it without hardcoding 0
+```
+
 ## 0.12.3
 
 Four ways the designer could write a project that did not build, and the

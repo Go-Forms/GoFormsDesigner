@@ -27,6 +27,20 @@ export interface CollectionItem {
 	depth?: number;
 }
 
+/** One DataGridView column as the designer edits it: the header caption
+ * plus the three things that are not caption. Mirrors the tool's
+ * GridColumnSpec; the index is the position in the list. */
+export interface GridColumnSpec {
+	title: string;
+	/** "" or absent for a text column, else "Button" or "CheckBox". */
+	kind?: string;
+	/** Keeps the column's data without drawing it - the id a row was loaded
+	 * by. Still readable with Cell(row, col) at runtime. */
+	hidden?: boolean;
+	/** Fixed caption on a button column; empty uses each cell's own value. */
+	buttonText?: string;
+}
+
 export interface ControlSpec {
 	id: string;
 	type: string;
@@ -44,6 +58,8 @@ export interface ControlSpec {
 	/** Set when the file's own add calls contain something the tool can't
 	 * regenerate, so the list is shown but not editable. */
 	collectionReadOnly?: boolean;
+	/** A DataGridView's per-column configuration, one entry per title. */
+	columns?: GridColumnSpec[];
 	props?: Record<string, string>;
 	events?: Record<string, string>;
 	group?: string;
@@ -77,6 +93,7 @@ export interface Op {
 		| 'setText'
 		| 'setItems'
 		| 'setCollection'
+		| 'setColumns'
 		| 'setProp'
 		| 'setEvent'
 		| 'add'
@@ -99,6 +116,9 @@ export interface Op {
 	/** The complete new item list for "setCollection" - it replaces the
 	 * control's existing one rather than merging. */
 	collection?: CollectionItem[];
+	/** The complete new column table for "setColumns" - it rewrites both the
+	 * constructor's titles and the indexed per-column setters after it. */
+	columns?: GridColumnSpec[];
 	prop?: string;
 	value?: string;
 	event?: string;
