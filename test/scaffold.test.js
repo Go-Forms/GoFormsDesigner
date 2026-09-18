@@ -78,7 +78,26 @@ for (const template of projectTemplates) {
 	test(`the ${template} template names the published module`, () => {
 		const files = render(path.join(templates, template), tokensFor('myapp', false));
 		assert.match(files['go.mod'], /require\b[\s\S]*github\.com\/Go-Forms\/GoForms/);
-		assert.ok(!/replace/.test(files['go.mod']), 'a project with no local checkout needs no replace');
+		// A project with no local checkout is not pinned to this machine:
+		// nothing redirects the framework itself to a path on disk.
+		assert.ok(
+			!/replace\s+github\.com\/Go-Forms\/GoForms\b/.test(files['go.mod']),
+			'a project with no local checkout needs no replace for the framework'
+		);
+		assert.ok(!/=>\s*\.{0,2}[\\/]/.test(files['go.mod']), 'no replace should point at a local path');
+	});
+
+	// The browser shim decides whether a key is a character by its length,
+	// and upstream counts bytes - so Cyrillic, Greek and every accented
+	// character never reach a WebAssembly build. Until that is upstream, the
+	// redirect is what makes those projects usable, and losing it would be
+	// invisible until someone typed.
+	test(`the ${template} template redirects the browser shim`, () => {
+		const files = render(path.join(templates, template), tokensFor('myapp', false));
+		assert.match(
+			files['go.mod'],
+			/replace\s+github\.com\/fyne-io\/glfw-js\s+=>\s+github\.com\/Go-Forms\/glfw-js\s+v\d+\.\d+\.\d+/
+		);
 	});
 }
 

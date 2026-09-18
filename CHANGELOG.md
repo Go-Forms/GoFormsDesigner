@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.12.6
+
+Cyrillic in the browser.
+
+Typing in a Russian layout in a WebAssembly build produced nothing at all - not
+a wrong character, nothing - and no error anywhere to say why. The same was
+true of Greek, Hebrew and every accented Latin character.
+
+The cause was three levels down, in the browser shim Fyne uses for its GLFW
+calls. Its `keydown` handler has to tell a printable key from a named one:
+`KeyboardEvent.key` is `"a"` for one and `"Enter"` or `"ArrowLeft"` for the
+other. It did that with `len(keyStr) == 1` - a length in **bytes**, which only
+agrees with "one character" for ASCII. `"ф"` is two bytes and `"€"` is three,
+so both failed the test and the character callback never fired.
+
+New projects now build against
+[Go-Forms/glfw-js](https://github.com/Go-Forms/glfw-js), that shim with the
+one-line fix, through a `replace` in their `go.mod`. It changes nothing for a
+desktop or Android build - the shim is only compiled for `js/wasm` - and the
+fix carries nothing fork-specific, so it can go upstream as it stands.
+
+An existing project needs the same line added to its own `go.mod`:
+
+```
+replace github.com/fyne-io/glfw-js => github.com/Go-Forms/glfw-js v0.4.1
+```
+
 ## 0.12.5
 
 The form's own properties and events.
