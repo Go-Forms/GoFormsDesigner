@@ -431,7 +431,86 @@ func singularLabel(label string) string {
 	return strings.TrimSuffix(label, "s")
 }
 
+// planFormProp sets one of the Form's own properties. It is reached by a
+// "setProp" with an empty ID - the same way "setForm" addresses the form -
+// because the Form is not a control and has no ID to name.
+func planFormProp(r *parseResult, op Op) (*edit, error) {
+	if method, ok := formDesc.Calls[op.Prop]; ok {
+		return planFormCallProp(r, op, method)
+	}
+	setter := ""
+	for m, p := range formDesc.Setters {
+		if p == op.Prop {
+			setter = m
+			break
+		}
+	}
+	if setter == "" {
+		return nil, fmt.Errorf("the form has no property %q", op.Prop)
+	}
+	text, err := formatPropValue(formDesc, op.Prop, op.Value)
+	if err != nil {
+		return nil, err
+	}
+	if arg, ok := r.form.singleArgs[op.Prop]; ok {
+		return &edit{offset(r.fset, arg.Pos()), offset(r.fset, arg.End()), text}, nil
+	}
+	insertAt, indent := afterFormAnchor(r)
+	return &edit{insertAt, insertAt, fmt.Sprintf("%s%s.%s(%s)\n", indent, r.model.RecvVar, setter, text)}, nil
+}
+
+// planFormCallProp turns a bool the Form spells as a bare call - its
+// CenterOnScreen - on or off: true writes the line, false deletes it.
+func planFormCallProp(r *parseResult, op Op, method string) (*edit, error) {
+	if op.Value != "true" && op.Value != "false" {
+		return nil, fmt.Errorf("property %q is a bool, got %q", op.Prop, op.Value)
+	}
+	existing, wired := r.form.callStmts[op.Prop]
+	if op.Value == "false" {
+		if !wired {
+			return nil, nil
+		}
+		start, end := wholeLines(r.src, offset(r.fset, existing.Start), offset(r.fset, existing.End))
+		return &edit{start, end, ""}, nil
+	}
+	if wired {
+		return nil, nil
+	}
+	insertAt, indent := afterFormAnchor(r)
+	return &edit{insertAt, insertAt, fmt.Sprintf("%s%s.%s()\n", indent, r.model.RecvVar, method)}, nil
+}
+
+// afterFormAnchor is where a new statement about the Form goes: after the
+// last one already there, or at the top of initializeComponent if there is
+// none. The form's own settings stay above the controls - which is how a
+// hand-written file reads, and what keeps a Load handler from being wired
+// after half the form has already been built.
+func afterFormAnchor(r *parseResult) (int, string) {
+	if r.form.anchor != token.NoPos {
+		at := offset(r.fset, r.form.anchor)
+		indent := leadingIndent(r.src, at)
+		for at < len(r.src) && r.src[at] != '\n' {
+			at++
+		}
+		if at < len(r.src) {
+			at++
+		}
+		return at, indent
+	}
+	at := r.model.InitRange.Start
+	for at < len(r.src) && r.src[at] != '\n' {
+		at++
+	}
+	if at < len(r.src) {
+		at++
+	}
+	return at, "\t"
+}
+
 func planSetProp(r *parseResult, op Op) (*edit, error) {
+	if op.ID == "" {
+		return planFormProp(r, op)
+	}
 	pc, err := mustControl(r, op.ID)
 	if err != nil {
 		return nil, err
@@ -570,7 +649,34 @@ func formatPropValue(desc *ControlDesc, prop, value string) (string, error) {
 	}
 }
 
+// planFormEvent wires one of the Form's own events - Load, Closing, Closed,
+// and the interaction events every control has. Reached by a "setEvent" with
+// an empty ID.
+func planFormEvent(r *parseResult, op Op) (*edit, error) {
+	if _, ok := eventArgType(formDesc, op.Event); !ok {
+		return nil, fmt.Errorf("the form has no %q event", op.Event)
+	}
+	if existing, ok := r.model.FormEvents[op.Event]; ok && existing == op.Handler {
+		return nil, nil
+	}
+	stmtOf := func(indent string) string {
+		return fmt.Sprintf("%s%s.%s.Handle(%s.%s)\n", indent, r.model.RecvVar, op.Event, r.model.RecvVar, op.Handler)
+	}
+	// Re-wiring rewrites the line already there: Event.Handle is multicast,
+	// so a second call would make both handlers run rather than replace the
+	// first - the same reason a control's re-wire rewrites in place.
+	if rng, ok := r.form.eventStmts[op.Event]; ok {
+		start, end := wholeLines(r.src, offset(r.fset, rng.Start), offset(r.fset, rng.End))
+		return &edit{start, end, stmtOf(lineIndent(r.src, start))}, nil
+	}
+	insertAt, indent := afterFormAnchor(r)
+	return &edit{insertAt, insertAt, stmtOf(indent)}, nil
+}
+
 func planSetEvent(r *parseResult, op Op) (*edit, error) {
+	if op.ID == "" {
+		return planFormEvent(r, op)
+	}
 	pc, err := mustControl(r, op.ID)
 	if err != nil {
 		return nil, err

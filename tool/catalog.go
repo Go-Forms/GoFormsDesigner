@@ -158,6 +158,37 @@ var baseEvents = map[string]string{
 	"EnabledChanged": "EventArgs",
 }
 
+// formDesc describes the Form itself - the properties and events it has that
+// are not a control's.
+//
+// The Form is not in `catalog`: it cannot be added, removed, renamed or
+// parented, and putting it there would put it in the toolbox. It is served
+// alongside the catalog under the reserved key "Form" so the property panel
+// can build the form's own groups from the same data as everything else,
+// instead of hardcoding a second list in the webview.
+//
+// Title and size are deliberately absent: they are arguments of
+// goforms.NewForm, edited by the "setForm" op, not setters.
+var formDesc = &ControlDesc{
+	Type: "Form",
+	Setters: map[string]string{
+		"SetFixedSize":  "fixedSize",
+		"SetAutoScroll": "autoScroll",
+	},
+	Kinds: map[string]string{
+		"fixedSize":  KindBool,
+		"autoScroll": KindBool,
+	},
+	// CenterOnScreen takes no argument, so it is a bool written as a bare
+	// call - the same shape a Timer's Start() has.
+	Calls: map[string]string{"centerOnScreen": "CenterOnScreen"},
+	// The Form's own events, on top of the ones every control has. Closing
+	// carries a *CancelEventArgs: a handler has to be able to say no, which
+	// a value copy could not.
+	Events:    []string{"Load", "Closing", "Closed"},
+	EventArgs: map[string]string{"Closing": "*CancelEventArgs"},
+}
+
 // baseEventOrder keeps the property panel's event list stable and grouped
 // the way a WinForms developer expects, rather than alphabetical.
 var baseEventOrder = []string{

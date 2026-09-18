@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.12.5
+
+The form's own properties and events.
+
+Clicking the form's background gave you its title and its size, and that was
+all the designer knew about it - so making a window non-resizable, centring it
+on screen, or wiring `Load` meant leaving for the text editor, on a form the
+designer otherwise owns.
+
+The panel now shows the Form's properties and events through the same two
+builders every control uses, from a descriptor the tool serves alongside the
+catalog. It is not a palette entry - a form cannot be added to a form - so the
+toolbox skips it by name.
+
+`Closing` carries a `*CancelEventArgs`, and the generated stub gets that type
+rather than a plain `EventArgs`: a handler that cannot say no is not a closing
+handler. Form settings are written above the controls, where a hand-written
+file puts them, so a `Load` handler is never wired after half the form has
+already been built.
+
 ## 0.12.4
 
 Grid columns, in the designer.

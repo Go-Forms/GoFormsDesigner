@@ -544,6 +544,10 @@
 		const filter = toolboxFilter.trim().toLowerCase();
 		const groups = new Map();
 		for (const type of Object.keys(catalog).sort()) {
+			// "Form" is served with the catalog so the form's own panel can be
+			// built from the same data as every control's, but it is not a
+			// palette entry: it cannot be added, removed, renamed or parented.
+			if (type === 'Form') continue;
 			if (filter && !type.toLowerCase().includes(filter)) continue;
 			const cat = catalog[type].Category || 'Common Controls';
 			if (!groups.has(cat)) groups.set(cat, []);
@@ -2420,7 +2424,7 @@
 			selectedIds.size,
 			// The form's own panel is what shows when nothing is selected, so
 			// its values belong in the digest too.
-			model && [model.formTitle, model.formWidth, model.formHeight],
+			model && [model.formTitle, model.formWidth, model.formHeight, model.formProps, model.formEvents],
 			// The parent picker lists every container on the form, so it goes
 			// stale when controls are added or removed elsewhere.
 			model ? model.controls.map((c) => c.id) : null,
@@ -3382,6 +3386,29 @@
 		sizeInput('Height', model.formHeight, (v) => send('', model.formWidth, v));
 
 		panel.appendChild(g);
+
+		// The form's own properties and events, through the same two builders
+		// every control uses. The Form is addressed by an empty id - it has no
+		// name to give - which is what the tool's setProp/setEvent expect and
+		// what setForm has always done. idLabel is only for the placeholder a
+		// handler name is suggested from.
+		const formDesc = catalog && catalog.Form;
+		if (formDesc) {
+			const formSpec = {
+				id: '',
+				idLabel: model.receiverType,
+				type: 'Form',
+				props: model.formProps || {},
+				events: model.formEvents || {},
+			};
+			const props = propsOf(formDesc);
+			if (props.length) {
+				appendPropsGroup(panel, formSpec, props, formDesc);
+			}
+			if (formDesc.Events && formDesc.Events.length) {
+				appendEventsGroup(panel, formSpec, formDesc.Events, formDesc);
+			}
+		}
 	}
 
 	function appendEventsGroup(panel, spec, events, desc) {
@@ -3412,7 +3439,7 @@
 			const input = document.createElement('input');
 			input.type = 'text';
 			input.value = current;
-			input.placeholder = `${spec.id}_${eventName}`;
+			input.placeholder = `${spec.idLabel || spec.id}_${eventName}`;
 			row.appendChild(input);
 
 			const btn = document.createElement('button');

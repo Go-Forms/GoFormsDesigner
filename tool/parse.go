@@ -86,6 +86,40 @@ type pgroup struct {
 	blockStart token.Pos
 }
 
+// pform is the Form's counterpart of pcontrol: where its own settings are
+// written, so setProp/setEvent on the form can rewrite a line in place
+// instead of appending a second one that says something different.
+type pform struct {
+	singleArgs map[string]ast.Expr
+	callStmts  map[string]ByteRangeTok
+	eventStmts map[string]ByteRangeTok
+	// anchor is the end of the last statement about the form, which is where
+	// a new one goes. The form's settings stay together at the top of
+	// initializeComponent, above the controls, which is both how a hand-
+	// written file reads and what keeps a Load handler from being wired after
+	// half the form is already built.
+	anchor token.Pos
+}
+
+func newPForm() *pform {
+	return &pform{
+		singleArgs: map[string]ast.Expr{},
+		callStmts:  map[string]ByteRangeTok{},
+		eventStmts: map[string]ByteRangeTok{},
+	}
+}
+
+// formCallProp maps a no-argument Form method to the bool property it stands
+// for, or "" if it is not one.
+func formCallProp(method string) string {
+	for prop, m := range formDesc.Calls {
+		if m == method {
+			return prop
+		}
+	}
+	return ""
+}
+
 // parseResult bundles the public FormModel with the position details apply.go
 // needs. Every CLI command re-parses the file fresh rather than trying to
 // keep state across invocations - simpler and always reflects what's really
@@ -99,6 +133,7 @@ type parseResult struct {
 	controls map[string]*pcontrol // by ID, includes unfinished ones
 	groups   map[string]*pgroup
 	order    []string // control IDs in AddControl-encounter order
+	form     *pform   // the Form's own settings; never nil
 
 	// structType is the receiver struct's type node and initBody the body of
 	// initializeComponent - the two regions tidy.go rewrites wholesale.
@@ -249,10 +284,13 @@ func parseFile(path string) (*parseResult, error) {
 		// does `model.controls.filter(...)` etc. without a null-check, which
 		// throws (silently, in a webview) for any form with zero controls -
 		// most visibly a freshly created new form via `GoForms: New Form...`.
+		form: newPForm(),
 		model: &FormModel{
 			Package:     f.Name.Name,
 			Controls:    []*ControlSpec{},
 			RadioGroups: []*RadioGroupSpec{},
+			FormProps:   map[string]string{},
+			FormEvents:  map[string]string{},
 		},
 	}
 
@@ -885,6 +923,39 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 	case len(parts) == 2 && parts[1] == "SetClientSize":
 		if len(call.Args) == 2 {
 			r.clientSizeArgs = call.Args
+		}
+		// Whatever else it is, it is the line a new form setting goes after:
+		// the size is the first thing initializeComponent does.
+		r.form.anchor = maxPos(r.form.anchor, s.End())
+
+	// mf.CenterOnScreen() - a bool the Form spells as a bare call.
+	case len(parts) == 2 && len(call.Args) == 0 && formCallProp(parts[1]) != "":
+		prop := formCallProp(parts[1])
+		r.model.FormProps[prop] = "true"
+		r.form.callStmts[prop] = ByteRangeTok{Start: s.Pos(), End: s.End()}
+		r.form.anchor = maxPos(r.form.anchor, s.End())
+
+	// mf.SetFixedSize(true) - the Form's own single-value setters. The case
+	// names the setter table rather than just the shape: `mf.AddControl(x)`
+	// is also a one-argument call on the receiver, and a looser condition
+	// here swallows it before the case below ever sees it.
+	case len(parts) == 2 && len(call.Args) == 1 && formDesc.Setters[parts[1]] != "":
+		prop := formDesc.Setters[parts[1]]
+		if v, ok := readPropValue(call.Args[0], kindOf(formDesc, prop)); ok {
+			r.model.FormProps[prop] = v
+			r.form.singleArgs[prop] = call.Args[0]
+		}
+		r.form.anchor = maxPos(r.form.anchor, s.End())
+
+	// mf.Load.Handle(mf.MainForm_Load) - the Form's own events. A control's
+	// is one selector longer and is handled below.
+	case len(parts) == 3 && parts[2] == "Handle":
+		if len(call.Args) == 1 {
+			if argParts, ok := selChain(call.Args[0]); ok && len(argParts) == 2 && argParts[0] == recvVar {
+				r.model.FormEvents[parts[1]] = argParts[1]
+				r.form.eventStmts[parts[1]] = ByteRangeTok{Start: s.Pos(), End: s.End()}
+				r.form.anchor = maxPos(r.form.anchor, s.End())
+			}
 		}
 
 	// mf.AddControl(mf.field)

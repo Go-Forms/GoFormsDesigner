@@ -130,6 +130,14 @@ type FormModel struct {
 	Controls    []*ControlSpec    `json:"controls"`
 	RadioGroups []*RadioGroupSpec `json:"radioGroups,omitempty"`
 
+	// FormProps and FormEvents are the Form's own settings - the ones that
+	// are not the title and size carried by goforms.NewForm. They are read
+	// from the `<recv>.SetXxx(...)` and `<recv>.<Event>.Handle(...)` calls in
+	// initializeComponent, and written by "setProp"/"setEvent" with an empty
+	// ID, the same way "setForm" addresses the form with an empty ID.
+	FormProps  map[string]string `json:"formProps,omitempty"`
+	FormEvents map[string]string `json:"formEvents,omitempty"`
+
 	// StructRange is the `type X struct { ... }` body (between braces),
 	// where new field declarations are inserted/removed.
 	StructRange ByteRange `json:"structRange"`

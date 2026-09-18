@@ -204,6 +204,23 @@ func cmdCatalog() error {
 		}
 		out[name] = &merged
 	}
+
+	// The Form under a reserved key. It is not a control - it cannot be
+	// added, removed, renamed or parented - so it is not in `catalog` and
+	// the toolbox skips this key by name. Serving it here means the property
+	// panel builds the form's own groups from the same data as every other
+	// type instead of hardcoding a second list in the webview.
+	form := *formDesc
+	form.Events = allEventsFor(formDesc)
+	form.OwnEventCount = len(formDesc.Events)
+	form.EventArgs = map[string]string{}
+	for _, ev := range form.Events {
+		if t, ok := eventArgType(formDesc, ev); ok {
+			form.EventArgs[ev] = t
+		}
+	}
+	out["Form"] = &form
+
 	return printJSON(out)
 }
 
