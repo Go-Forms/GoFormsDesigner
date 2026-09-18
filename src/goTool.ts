@@ -116,6 +116,9 @@ export interface TidyResult {
 	fields: number;
 	/** Commented-out generated statements dropped. */
 	comments: number;
+	/** Control blocks moved back below the container they are added to - a
+	 * child left above its parent is a nil dereference at form load. */
+	moved: number;
 	/** The removed source lines, trimmed, for reporting back to the user. */
 	removed: string[] | null;
 }

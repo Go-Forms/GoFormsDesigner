@@ -28,7 +28,7 @@ func planRename(r *parseResult, op Op) ([]edit, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateGoIdent(newID); err != nil {
+	if err := validateControlName(newID); err != nil {
 		return nil, err
 	}
 	if newID == oldID {
@@ -116,12 +116,20 @@ func renamedHandlers(pc *pcontrol, oldID, newID string) map[string]string {
 	return out
 }
 
-// renameHandlersInPairedFile renames handler *methods* in the hand-written
-// counterpart of a designer file. It is a no-op when the file doesn't exist
-// or doesn't declare the method - a control can perfectly well be renamed
-// before any handler is wired.
-func renameHandlersInPairedFile(designerPath, receiverType string, renames map[string]string) error {
-	if len(renames) == 0 {
+// renameInPairedFile carries a rename into the hand-written counterpart of a
+// designer file: the handler *methods* whose names the designer generated,
+// and every `<recv>.<oldID>` reference to the control itself.
+//
+// The references matter as much as the methods. A handler almost always uses
+// the control it belongs to - `mf.btnGreet.SetEnabled(false)` - and renaming
+// the field on one side of the pair while leaving the other pointing at the
+// old name is not a half-finished rename, it is a project that no longer
+// compiles.
+//
+// It is a no-op when the file doesn't exist or mentions none of this - a
+// control can perfectly well be renamed before any handler is wired.
+func renameInPairedFile(designerPath, receiverType, oldID, newID string, handlers map[string]string) error {
+	if len(handlers) == 0 && oldID == newID {
 		return nil
 	}
 	dir := filepath.Dir(designerPath)
@@ -151,13 +159,41 @@ func renameHandlersInPairedFile(designerPath, receiverType string, renames map[s
 		if id, ok := se.X.(*ast.Ident); !ok || id.Name != receiverType {
 			continue
 		}
-		if newName, ok := renames[fd.Name.Name]; ok {
+
+		if newName, ok := handlers[fd.Name.Name]; ok {
 			edits = append(edits, edit{
 				fset.Position(fd.Name.Pos()).Offset,
 				fset.Position(fd.Name.End()).Offset,
 				newName,
 			})
 		}
+
+		// The receiver is named per method here, not once per file, so each
+		// body is searched for its own receiver rather than a global one.
+		// A method that discards its receiver (`func (*MainForm) f()`) cannot
+		// be referring to the field at all.
+		if oldID == newID || len(fd.Recv.List[0].Names) != 1 {
+			continue
+		}
+		recv := fd.Recv.List[0].Names[0].Name
+		if recv == "_" {
+			continue
+		}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != oldID {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); !ok || id.Name != recv {
+				return true
+			}
+			edits = append(edits, edit{
+				fset.Position(sel.Sel.Pos()).Offset,
+				fset.Position(sel.Sel.End()).Offset,
+				newID,
+			})
+			return true
+		})
 	}
 	if len(edits) == 0 {
 		return nil
@@ -188,6 +224,68 @@ func validateGoIdent(name string) error {
 		return fmt.Errorf("%q is a Go keyword", name)
 	}
 	return nil
+}
+
+// validateControlName is validateGoIdent plus the names a control may not
+// take because the form already has them.
+//
+// A designer file's receiver embeds *goforms.Form, so every exported member
+// of Form and ControlBase is promoted onto it. A struct field of the same
+// name wins over the promoted member at depth 0 - quietly, with no error at
+// the declaration - and the call sites break instead: name a button
+// `AddControl` and `mf.AddControl(mf.other)` stops compiling, taking the
+// whole file with it.
+func validateControlName(name string) error {
+	if err := validateGoIdent(name); err != nil {
+		return err
+	}
+	if formMembers[name] {
+		return fmt.Errorf("%q is already a member of the form (it comes from goforms.Form), "+
+			"and a control by that name would hide it", name)
+	}
+	return nil
+}
+
+// formMembers are the exported methods and event fields a designer file's
+// receiver inherits from the embedded *goforms.Form - i.e. every name a
+// control field would shadow.
+//
+// It is a list rather than something derived, because the tool never loads
+// the framework: it edits source text and has no idea what goforms.Form
+// looks like. If Form grows a member, this grows with it; missing one costs
+// a confusing compile error in a file the designer wrote, not corruption.
+var formMembers = map[string]bool{
+	// ControlBase and ContainerControl, promoted through Form.
+	"AddControl": true, "RemoveControl": true, "Controls": true,
+	"Anchor": true, "SetAnchor": true, "Dock": true, "SetDock": true,
+	"Padding": true, "SetPadding": true, "Bounds": true, "SetBounds": true,
+	"SetLocation": true, "SetSize": true, "Object": true, "Events": true,
+	"Name": true, "SetName": true, "Tag": true, "SetTag": true,
+	"Visible": true, "SetVisible": true, "Enabled": true, "SetEnabled": true,
+	"Font": true, "SetFont": true, "FontSupported": true,
+	"ForeColor": true, "SetForeColor": true, "BackColor": true, "SetBackColor": true,
+	"TabIndex": true, "SetTabIndex": true, "TabStop": true, "SetTabStop": true,
+	"SetContextMenu": true, "ContextMenuSupported": true, "ResetLayoutBaseline": true,
+	"AutoScroll": true, "SetAutoScroll": true,
+
+	// Form's own.
+	"Show": true, "ShowDialog": true, "Hide": true, "Close": true,
+	"CloseWithResult": true, "DialogResult": true, "CenterOnScreen": true,
+	"ClientSize": true, "SetClientSize": true, "SetFixedSize": true,
+	"SetIcon": true, "SetMainMenu": true, "Text": true, "SetText": true,
+	"Window": true,
+}
+
+// The form's events are fields, not methods, and shadow just the same - so
+// they come from the one table that already lists them rather than being
+// written out again here.
+func init() {
+	for name := range baseEvents {
+		formMembers[name] = true
+	}
+	for _, name := range []string{"Load", "Closing", "Closed"} {
+		formMembers[name] = true
+	}
 }
 
 var goKeywords = map[string]bool{

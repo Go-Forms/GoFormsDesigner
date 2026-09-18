@@ -431,12 +431,18 @@ async function tidyDesignerFile(context: vscode.ExtensionContext, uri?: vscode.U
 			vscode.window.showInformationMessage(`${path.basename(target.fsPath)} is already clean.`);
 			return;
 		}
-		const parts = [
+		const dropped = [
 			result.statements && `${result.statements} redundant call(s)`,
 			result.fields && `${result.fields} duplicate field(s)`,
 			result.comments && `${result.comments} commented-out statement(s)`,
 		].filter(Boolean);
-		vscode.window.showInformationMessage(`Tidied ${path.basename(target.fsPath)}: removed ${parts.join(', ')}.`);
+		// Moving is reported separately from dropping: nothing was lost, a
+		// control was simply put back below the container it is added to.
+		const parts = [
+			dropped.length && `removed ${dropped.join(', ')}`,
+			result.moved && `moved ${result.moved} control block(s) below their container`,
+		].filter(Boolean);
+		vscode.window.showInformationMessage(`Tidied ${path.basename(target.fsPath)}: ${parts.join('; ')}.`);
 	} catch (err) {
 		vscode.window.showErrorMessage(`GoForms: tidy failed - ${err instanceof Error ? err.message : String(err)}`);
 	}

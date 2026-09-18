@@ -72,6 +72,11 @@ type ControlDesc struct {
 	// "TextChanged". The events every control inherits from ControlBase are
 	// in baseEvents and are merged in by AllEvents.
 	Events []string
+	// Imports lists the packages besides goforms this type's constructor
+	// needs - "time" for the two controls seeded with time.Now(). "add"
+	// brings them with the control, so dropping one from the palette cannot
+	// leave a file that does not compile (see imports.go).
+	Imports []string `json:",omitempty"`
 	// EventArgs gives the Go argument type of a semantic event, without the
 	// "goforms." qualifier. Absent means EventArgs.
 	EventArgs map[string]string
@@ -419,7 +424,8 @@ var catalog = map[string]*ControlDesc{
 	},
 	"DateTimePicker": {
 		Type: "DateTimePicker", Ctors: []string{"NewDateTimePicker"}, DefaultW: 150, DefaultH: 30,
-		Events: []string{"ValueChanged"},
+		Events:  []string{"ValueChanged"},
+		Imports: []string{"time"},
 	},
 	"LinkLabel": {
 		Type: "LinkLabel", Ctors: []string{"NewLinkLabel", "NewLinkLabelWithURL"}, DefaultW: 100, DefaultH: 24,
@@ -486,8 +492,15 @@ var catalog = map[string]*ControlDesc{
 		Events: []string{"ItemCheck"},
 	},
 	"MonthCalendar": {
-		Type: "MonthCalendar", Ctors: []string{"NewMonthCalendar"}, DefaultW: 260, DefaultH: 240,
-		Events: []string{"DateChanged"},
+		// 271 high, not 240: a month grid needs 270.5 and Fyne draws a
+		// calendar clipped rather than scrolled, so anything shorter puts the
+		// last row of days outside the control where it cannot be clicked.
+		// The control refuses to be smaller than this anyway (GoForms
+		// inputcontrols.go), so a smaller default would only ever disagree
+		// with what the running form shows.
+		Type: "MonthCalendar", Ctors: []string{"NewMonthCalendar"}, DefaultW: 260, DefaultH: 271,
+		Events:  []string{"DateChanged"},
+		Imports: []string{"time"},
 	},
 	"DomainUpDown": {
 		Type: "DomainUpDown", Ctors: []string{"NewDomainUpDown"}, DefaultW: 160, DefaultH: 48,
@@ -577,7 +590,17 @@ var catalog = map[string]*ControlDesc{
 			"columnsMode": {"SizeFixed", "SizeToContent", "SizeFill"},
 			"rowsMode":    {"SizeFixed", "SizeToContent"},
 		},
-		Events: []string{"CellClick", "SelectionChanged", "CellValueChanged", "RowsChanged"},
+		Events: []string{"CellClick", "SelectionChanged", "CellValueChanged", "CellButtonClick", "RowsChanged"},
+		// Four of the five carry a cell, not a bare EventArgs. Getting this
+		// wrong is not cosmetic: ensure-handler writes the stub's parameter
+		// from here, and a stub with the wrong type does not satisfy
+		// Event.Handle, so wiring the event stops the project compiling.
+		EventArgs: map[string]string{
+			"CellClick":        "GridCellEventArgs",
+			"SelectionChanged": "GridCellEventArgs",
+			"CellButtonClick":  "GridCellEventArgs",
+			"CellValueChanged": "GridCellValueEventArgs",
+		},
 	},
 	"ColorPickerButton": {
 		Type: "ColorPickerButton", Ctors: []string{"NewColorPickerButton"}, DefaultW: 110, DefaultH: 30,

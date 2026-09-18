@@ -1,5 +1,82 @@
 # Changelog
 
+## 0.12.3
+
+Four ways the designer could write a project that did not build, and the
+framework release that goes with them.
+
+### A form that would not load
+
+`initializeComponent` runs top to bottom, and a control is parented by a call
+on its container - `mf.grpBox.AddControl(mf.btnOne)`. Nothing kept the two in
+that order. Adding a control appends its block at the end of the method and
+dragging it into a container rewrites one line, so the ordinary way of working
+- drop the controls, drop a GroupBox around them, drag them in - wrote the
+`AddControl` call above the line that creates the GroupBox. It read fine in
+the designer, because the designer reads the parent off that same line; it was
+a nil dereference the first time the form loaded.
+
+Every write now ends by putting each control's block back after its parent's,
+by permuting the blocks among the positions they already occupy. A file that
+is already in order is left byte-for-byte alone, so this does not churn diffs,
+and only blocks move: statements the tool does not model stay exactly where
+they are. Where the permutation cannot be done blindly - blocks interleaved
+with each other, or a hand-written line like a radio group's `Add` that names
+a control and would end up on the wrong side of it - the file is left
+untouched rather than rearranged into something subtly different.
+
+**GoForms: Tidy Designer File** performs the same repair, for the forms an
+earlier release already broke, and reports what it moved. A control added to a
+non-empty `initializeComponent` also gets a blank line above it now, so blocks
+are separable by eye as well as by the tool.
+
+### Deleting a container
+
+Deleting one deleted the container and nothing else, so its children were left
+calling `AddControl` on a field that had just been removed - a file that does
+not compile at all, from pressing Delete on a GroupBox. The canvas had assumed
+all along that the tool cascaded; it says so in a comment. Now it does. The
+whole subtree goes, at any depth, including controls standing on a tab page,
+and a radio group stops naming a button that is no longer there.
+
+### Renaming a control
+
+Renaming moved the field, every reference in the designer file, and the
+handler *methods* in the hand-written half - but not the references to the
+control in that half. Since a handler almost always uses the control it
+belongs to, `mf.btnGreet.SetEnabled(false)` was left pointing at a name that
+no longer existed. Both halves are now renamed together, receiver by receiver,
+so a file that spells it `mf` in one method and `f` in the next is handled and
+another type's field of the same name is not.
+
+A control also can no longer be named after something the form already has.
+The designer's receiver embeds `goforms.Form`, so a field called `AddControl`
+or `Close` or `Text` hides the member it is named after - quietly, with the
+error landing on some other line. Naming one of those is refused, with a
+sentence saying why, and **add** now validates the identifier the way rename
+always has instead of writing a broken file and discovering it on the next
+operation.
+
+### DateTimePicker and MonthCalendar
+
+Both are seeded with `time.Now()`, and the tool did not manage imports - so
+dropping either from the palette produced a file that did not compile until
+you added `"time"` by hand. A control type now declares the packages its
+constructor needs and **add** brings them along in the same atomic batch.
+
+`MonthCalendar`'s default size was also wrong: it was 240 tall where one month
+grid needs 271, and Fyne draws a calendar clipped rather than scrolled, so the
+last row of days sat outside the control where nothing could click it.
+
+### Grid events
+
+`CellClick`, `SelectionChanged` and `CellValueChanged` carry a cell, not a
+bare `EventArgs`, and the catalog did not say so - so the handler stub written
+for any of them had the wrong parameter type and did not satisfy `Handle`.
+Wiring one of those events stopped the project compiling. New projects also
+get framework **v0.3.0**, which adds button and checkbox columns, hidden
+columns, and fixes both date pickers.
+
 ## 0.12.2
 
 Edit verion in templates: v0.1.0 -> v0.2.0

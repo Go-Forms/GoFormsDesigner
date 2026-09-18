@@ -38,6 +38,7 @@ type TidyResult struct {
 	Statements int      `json:"statements"` // redundant calls dropped
 	Fields     int      `json:"fields"`     // duplicate struct fields dropped
 	Comments   int      `json:"comments"`   // commented-out generated lines dropped
+	Moved      int      `json:"moved"`      // blocks put back after their parent's
 	Removed    []string `json:"removed"`
 }
 
@@ -58,27 +59,39 @@ func tidyFile(path string) (*TidyResult, error) {
 	edits = appendStmtEdits(r, res, edits)
 	edits = appendFieldEdits(r, res, edits)
 	edits = appendCommentEdits(r, res, edits)
-	if len(edits) == 0 {
-		return res, nil
+
+	if len(edits) > 0 {
+		buf, err := spliceEdits(r.src, edits)
+		if err != nil {
+			return nil, err
+		}
+		// gofmt last: deleting lines out of the middle of a block leaves runs of
+		// blank lines behind, which is its own kind of litter.
+		formatted, err := format.Source(buf)
+		if err != nil {
+			return nil, fmt.Errorf("tidy would leave %s unparseable, so nothing was changed: %w", path, err)
+		}
+		if !bytes.Equal(formatted, r.src) {
+			if err := os.WriteFile(path, formatted, 0o644); err != nil {
+				return nil, fmt.Errorf("write %s: %w", path, err)
+			}
+			res.Changed = true
+		}
 	}
 
-	buf, err := spliceEdits(r.src, edits)
+	// A control parented to a container declared below it is a nil dereference
+	// at form load, not litter - but it is the same kind of damage tidy exists
+	// to undo, and this is the only command that reaches a file the designer
+	// never wrote (see reorder.go). It runs after the deletions above, so the
+	// blocks it moves are the ones that survived them.
+	moved, err := reorderFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("tidy could not reorder %s, so nothing was changed there: %w", path, err)
 	}
-	// gofmt last: deleting lines out of the middle of a block leaves runs of
-	// blank lines behind, which is its own kind of litter.
-	formatted, err := format.Source(buf)
-	if err != nil {
-		return nil, fmt.Errorf("tidy would leave %s unparseable, so nothing was changed: %w", path, err)
+	if moved > 0 {
+		res.Moved = moved
+		res.Changed = true
 	}
-	if bytes.Equal(formatted, r.src) {
-		return res, nil
-	}
-	if err := os.WriteFile(path, formatted, 0o644); err != nil {
-		return nil, fmt.Errorf("write %s: %w", path, err)
-	}
-	res.Changed = true
 	return res, nil
 }
 

@@ -66,11 +66,20 @@ func applyOps(path string, ops []Op) (*FormModel, error) {
 		if op.Op == "rename" {
 			if pc, ok := r.controls[op.ID]; ok {
 				renames := renamedHandlers(pc, op.ID, op.Value)
-				if err := renameHandlersInPairedFile(path, r.model.ReceiverType, renames); err != nil {
+				if err := renameInPairedFile(path, r.model.ReceiverType, op.ID, op.Value, renames); err != nil {
 					return rollback(fmt.Errorf("op %d (rename %q): %w", i, op.ID, err))
 				}
 			}
 		}
+	}
+
+	// Put every block back after its parent's before anything else looks at
+	// the file. An op is a local splice - "add" appends at the end of the
+	// method, "setParent" rewrites one AddControl line - so neither can tell
+	// that a control has just been moved into a container declared below it,
+	// which is a nil dereference at form load (see reorder.go).
+	if _, err := reorderFile(path); err != nil {
+		return rollback(err)
 	}
 
 	// gofmt once the whole batch is in. An op is a text splice, so it has no
@@ -544,6 +553,13 @@ func lineIndent(src []byte, off int) string {
 // closing brace) and the new control block (just before initializeComponent's
 // closing brace).
 func planAdd(r *parseResult, op Op) ([]edit, error) {
+	// The same check rename makes. Without it a bad name is only caught by
+	// the *next* op failing to parse the file this one just broke, and the
+	// error names a syntax error rather than the name that caused it - or,
+	// for a name that shadows a form member, is not caught at all.
+	if err := validateControlName(op.ID); err != nil {
+		return nil, err
+	}
 	if _, exists := r.controls[op.ID]; exists {
 		return nil, fmt.Errorf("control %q already exists", op.ID)
 	}
@@ -577,10 +593,43 @@ func planAdd(r *parseResult, op Op) ([]edit, error) {
 	fieldInsertAt := r.model.StructRange.End
 	field := fieldDecl(spec, "\t")
 
-	return []edit{
+	// One blank line between blocks. Without it a control added to a
+	// non-empty method is glued onto the previous one, and reorder.go's
+	// shuffling makes that much more visible: a block can now land next to
+	// one it was never written beside.
+	if !endsWithBlankLine(r.src, initInsertAt) {
+		block = "\n" + block
+	}
+
+	edits := []edit{
 		{initInsertAt, initInsertAt, block},
 		{fieldInsertAt, fieldInsertAt, field},
-	}, nil
+	}
+	// A constructor that needs more than goforms - DateTimePicker's
+	// time.Now() - brings its import with it, in the same atomic batch.
+	// Without this, dropping one from the palette wrote a file that did not
+	// compile (see imports.go).
+	return append(edits, planImportEdits(r, catalog[op.Type].Imports)...), nil
+}
+
+// endsWithBlankLine reports whether the text before off already ends in an
+// empty line - including the empty method whose body is nothing but
+// whitespace, where a leading blank line would just be padding.
+func endsWithBlankLine(src []byte, off int) bool {
+	seenNewline := false
+	for i := off - 1; i >= 0; i-- {
+		switch src[i] {
+		case ' ', '\t', '\r':
+		case '\n':
+			if seenNewline {
+				return true
+			}
+			seenNewline = true
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // checkParent validates a requested parent/slot pairing. A container that
@@ -671,17 +720,66 @@ func planSetParent(r *parseResult, op Op) (*edit, error) {
 	return &edit{start, end, strings.TrimSuffix(line, "\n")}, nil
 }
 
-// planRemove deletes both the control's struct field line and its whole
-// initializeComponent statement block, each extended to full lines
-// (leading indentation through trailing newline) so no blank/whitespace-only
-// line is left behind.
+// planRemove deletes a control and everything standing on it.
+//
+// The cascade is not a convenience: a control is parented by a call on its
+// container, so deleting a GroupBox without its children leaves them calling
+// AddControl on a field that no longer exists, and the file stops compiling
+// altogether. There is no useful middle ground either - a child whose
+// container is gone has nowhere to be - which is why the WinForms designer
+// deletes the contents with the container too.
 func planRemove(r *parseResult, op Op) ([]edit, error) {
-	pc, err := mustControl(r, op.ID)
-	if err != nil {
+	if _, err := mustControl(r, op.ID); err != nil {
 		return nil, err
 	}
-	start, end := wholeLines(r.src, offset(r.fset, pc.blockStart), offset(r.fset, pc.end()))
-	edits := []edit{{start, end, ""}}
+
+	var edits []edit
+	for _, id := range append([]string{op.ID}, descendantsOf(r, op.ID)...) {
+		pc, ok := r.controls[id]
+		if !ok {
+			continue
+		}
+		edits = appendControlDeletes(edits, r, pc)
+	}
+	return edits, nil
+}
+
+// descendantsOf lists every control standing on id, at any depth, in the
+// order they appear in the file.
+func descendantsOf(r *parseResult, id string) []string {
+	var out []string
+	// Walking the whole list per level rather than building a child index:
+	// a form has tens of controls, and this keeps the file's own order,
+	// which is what makes the resulting edits land in a predictable place.
+	frontier := map[string]bool{id: true}
+	for len(frontier) > 0 {
+		next := map[string]bool{}
+		for _, c := range r.model.Controls {
+			if frontier[c.Parent] && !frontier[c.ID] {
+				out = append(out, c.ID)
+				next[c.ID] = true
+			}
+		}
+		frontier = next
+	}
+	return out
+}
+
+// appendControlDeletes plans the removal of one control: its struct field
+// line and its whole initializeComponent block, each extended to full lines
+// (leading indentation through trailing newline) so no blank/whitespace-only
+// line is left behind, plus the statements about it that live outside the
+// block.
+func appendControlDeletes(edits []edit, r *parseResult, pc *pcontrol) []edit {
+	// The raw statement positions go to addLineDelete, which aligns them to
+	// line boundaries itself. Expanding them first and passing the result
+	// would have it read the already-aligned end - the first byte of the
+	// *next* line - as mid-line and swallow that line as well, which is how
+	// the struct loses its closing brace.
+	blockStart, blockEnd := offset(r.fset, pc.blockStart), offset(r.fset, pc.end())
+	edits = addLineDelete(edits, r.src, blockStart, blockEnd)
+	start, end := wholeLines(r.src, blockStart, blockEnd)
+
 	// Item-adding calls a hand-written file put *after* AddControl fall
 	// outside the block; leaving them would orphan `mf.<gone>.AddButton(...)`
 	// lines referencing a field that no longer exists.
@@ -692,6 +790,12 @@ func planRemove(r *parseResult, op Op) ([]edit, error) {
 		}
 		edits = addLineDelete(edits, r.src, s, e)
 	}
+	// The same goes for a radio group's `Add`, which is declared with the
+	// group rather than with the control.
+	if pc.groupAddRange.Start != token.NoPos {
+		edits = addLineDelete(edits, r.src,
+			offset(r.fset, pc.groupAddRange.Start), offset(r.fset, pc.groupAddRange.End))
+	}
 	if pc.fieldRange.Start != 0 {
 		// fieldRange is already line-aligned (see parse.go step 3b), so it is
 		// spliced directly. Running it through wholeLines again would read
@@ -700,7 +804,7 @@ func planRemove(r *parseResult, op Op) ([]edit, error) {
 		// with it.
 		edits = append(edits, edit{offset(r.fset, pc.fieldRange.Start), offset(r.fset, pc.fieldRange.End), ""})
 	}
-	return edits, nil
+	return edits
 }
 
 // wholeLines extends [start, end) backward to the start of its line and

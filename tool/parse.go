@@ -48,6 +48,12 @@ type pcontrol struct {
 	// addCtlRange spans the AddControl statement itself, which is the one
 	// line "setParent" rewrites to move a control into another container.
 	addCtlRange ByteRangeTok
+	// groupAddRange spans the `<recv>.<group>.Add(<recv>.<this>)` statement
+	// enrolling this control in a radio group, if there is one. It sits
+	// outside the control's block (the group is declared separately), so
+	// removing the control has to delete it by hand or the file is left
+	// adding a field that no longer exists.
+	groupAddRange ByteRangeTok
 	// eventStmts spans the `<recv>.<field>.<Event>.Handle(...)` statement
 	// already wiring each event, so re-wiring an event rewrites that line
 	// instead of stacking a second Handle call on top of it - Event.Handle
@@ -838,6 +844,7 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 			if pc := r.controlArg(call, recvVar); pc != nil {
 				g.spec.Members = append(g.spec.Members, pc.spec.ID)
 				pc.spec.Group = parts[1]
+				pc.groupAddRange = ByteRangeTok{Start: s.Pos(), End: s.End()}
 			}
 		}
 
