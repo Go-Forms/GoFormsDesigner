@@ -214,6 +214,16 @@
         "command": "goforms.addDebugConfig",
         "title": "%cmd.addDebugConfig.title%",
         "category": "GoForms"
+      },
+      {
+        "command": "goforms.setStartupForm",
+        "title": "%cmd.setStartupForm.title%",
+        "category": "GoForms"
+      },
+      {
+        "command": "goforms.checkForUpdates",
+        "title": "%cmd.checkForUpdates.title%",
+        "category": "GoForms"
       }
     ],
     "menus": {
@@ -237,6 +247,11 @@
           "command": "goforms.runDesktop",
           "when": "resourceFilename == go.mod",
           "group": "goforms@4"
+        },
+        {
+          "command": "goforms.setStartupForm",
+          "when": "resourceFilename =~ /-designer\\.go$/",
+          "group": "goforms@3"
         }
       ],
       "commandPalette": [
@@ -326,6 +341,13 @@
         },
         {
           "command": "goforms.addDebugConfig"
+        },
+        {
+          "command": "goforms.setStartupForm",
+          "when": "activeCustomEditorId == 'goforms.designer' || resourceFilename =~ /-designer\\.go$/"
+        },
+        {
+          "command": "goforms.checkForUpdates"
         }
       ],
       "editor/title": [
@@ -422,6 +444,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "%config.build.offline.markdownDescription%"
+        },
+        "goforms.checkForUpdates": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%config.checkForUpdates.markdownDescription%"
         }
       }
     },

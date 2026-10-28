@@ -31,11 +31,13 @@ import { registerNavigation } from './navigate';
 import { stopAllServers } from './serve';
 import { registerStatus } from './status';
 import { describeTools } from './tools';
+import { registerStartup } from './startup';
+import { registerUpdates } from './updates';
 
 export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('goforms.createProject', () => createProject(context)),
-		vscode.commands.registerCommand('goforms.newForm', (folderUri?: vscode.Uri) => newForm(folderUri)),
+		vscode.commands.registerCommand('goforms.newForm', (folderUri?: vscode.Uri) => newForm(context, folderUri)),
 		vscode.commands.registerCommand('goforms.newTheme', (folderUri?: vscode.Uri) => newTheme(context, folderUri)),
 		vscode.commands.registerCommand('goforms.setFrameworkPath', () => setFrameworkPath()),
 		vscode.commands.registerCommand('goforms.tidyDesignerFile', (uri?: vscode.Uri) => tidyDesignerFile(context, uri)),
@@ -45,6 +47,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	registerBuildCommands(context);
 	registerDebugCommands(context);
 	registerNavigation(context);
+	registerStartup(context);
+	registerUpdates(context);
 	registerStatus(context);
 	registerDesignerEditorIfAvailable(context);
 	registerThemeEditor(context);
@@ -213,9 +217,20 @@ async function createProject(context: vscode.ExtensionContext): Promise<void> {
 // goforms.newForm
 // ---------------------------------------------------------------------------
 
-async function newForm(folderUri?: vscode.Uri): Promise<void> {
+async function newForm(context: vscode.ExtensionContext, folderUri?: vscode.Uri): Promise<void> {
 	const targetFolder = await resolveTargetFolder(folderUri);
 	if (!targetFolder) {
+		return;
+	}
+
+	// A form made for a purpose, as Visual Studio's Add New Item offers:
+	// each one is a pair of files under templates/forms that the designer
+	// opens like any other.
+	const kind = await vscode.window.showQuickPick(formTemplates, {
+		title: 'GoForms: New Form',
+		placeHolder: 'What kind of form?',
+	});
+	if (!kind) {
 		return;
 	}
 
@@ -241,8 +256,15 @@ async function newForm(folderUri?: vscode.Uri): Promise<void> {
 
 	try {
 		await fs.mkdir(formDir, { recursive: true });
-		await fs.writeFile(designerPath, generateDesignerFile(formName, packageName), 'utf8');
-		await fs.writeFile(logicPath, generateLogicFile(formName, packageName), 'utf8');
+		if (kind.template) {
+			const dir = path.join(context.extensionPath, 'templates', 'forms', kind.template);
+			const fill = (text: string) => text.split('{{FORM}}').join(formName).split('{{PACKAGE}}').join(packageName);
+			await fs.writeFile(designerPath, fill(await fs.readFile(path.join(dir, 'FORM-designer.go'), 'utf8')), 'utf8');
+			await fs.writeFile(logicPath, fill(await fs.readFile(path.join(dir, 'FORM.go'), 'utf8')), 'utf8');
+		} else {
+			await fs.writeFile(designerPath, generateDesignerFile(formName, packageName), 'utf8');
+			await fs.writeFile(logicPath, generateLogicFile(formName, packageName), 'utf8');
+		}
 	} catch (err) {
 		vscode.window.showErrorMessage(`Failed to create form: ${(err as Error).message}`);
 		return;
@@ -347,6 +369,16 @@ async function resolveTargetFolder(folderUri?: vscode.Uri): Promise<string | und
 	});
 	return picked?.[0]?.fsPath;
 }
+
+/** The kinds of form New Form offers. `template` names a folder under
+ * templates/forms; the empty form is generated here. */
+const formTemplates: (vscode.QuickPickItem & { template?: string })[] = [
+	{ label: 'Empty form', description: 'A blank form' },
+	{ label: 'Dialog', description: 'A message with OK and Cancel, for ShowDialog', template: 'dialog' },
+	{ label: 'About Box', description: 'Product name, version, copyright and a description', template: 'about' },
+	{ label: 'Login Form', description: 'User name and password, OK and Cancel', template: 'login' },
+	{ label: 'Splash Screen', description: 'A title and a progress bar; closes itself after two seconds', template: 'splash' },
+];
 
 function generateDesignerFile(formName: string, packageName: string): string {
 	return `package ${packageName}

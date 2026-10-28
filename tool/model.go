@@ -131,6 +131,10 @@ type ControlSpec struct {
 	// restyle it - the same rule CollectionReadOnly follows.
 	TableReadOnly bool `json:"tableReadOnly,omitempty"`
 
+	// alias is the name the designer file reaches a project control's
+	// package by, worked out by "add" and used by codegen; never serialized.
+	alias string
+
 	// Supported is false when Type isn't in catalog - the control is still
 	// reported (so the canvas can show a placeholder box and the file isn't
 	// silently corrupted) but the designer must treat it as read-only.
@@ -232,4 +236,7 @@ type Op struct {
 	// TableColumns/TableRows are the complete new track lists for "setTable".
 	TableColumns []TrackSpec `json:"tableColumns,omitempty"`
 	TableRows    []TrackSpec `json:"tableRows,omitempty"`
+	// Custom describes a project control for "add" (see project.go): the
+	// designer has it from the toolbox, the tool from scanning the module.
+	Custom *CustomType `json:"custom,omitempty"`
 }

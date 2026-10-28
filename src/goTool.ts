@@ -161,6 +161,8 @@ export interface Op {
 	/** For "setTable" (and "add"): the complete column and row lists. */
 	tableColumns?: TrackSpec[];
 	tableRows?: TrackSpec[];
+	/** For "add" of a project control: its ControlDesc.Custom. */
+	custom?: ControlDesc['Custom'];
 }
 
 /** What `set-startup` did to main.go. Mirrors the tool's StartupResult. */
@@ -261,6 +263,9 @@ export interface ControlDesc {
 	Collection?: CollectionDesc;
 	/** Help text for each property and event, by name. */
 	Descriptions?: Record<string, string>;
+	/** Set for a control of the project's own: where it is imported from
+	 * and how it is constructed. */
+	Custom?: { import: string; package: string; name: string; ctor: string; sizeArgs?: boolean; embeds?: string };
 }
 
 /** Thrown when no `go` executable could be found. The message names every
@@ -501,6 +506,13 @@ export class GoFormsTool {
 	 * is atomic: a failure leaves the file exactly as it was. */
 	async themeApply(stylesPath: string, ops: ThemeOp[]): Promise<ThemeModel> {
 		return JSON.parse(await this.run(['theme-apply', stylesPath], JSON.stringify(ops)));
+	}
+
+	/** The project's own controls (see tool/project.go), keyed like the
+	 * catalog and in the same shape, found by reading the module containing
+	 * `file` - nothing of the project is built or run. */
+	async projectControls(file: string): Promise<Record<string, ControlDesc>> {
+		return JSON.parse(await this.run(['project-controls', file])) as Record<string, ControlDesc>;
 	}
 
 	/** Points main.go's goforms.Run at the form a designer file declares. */

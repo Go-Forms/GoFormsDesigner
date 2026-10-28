@@ -455,6 +455,7 @@
 				slot = '';
 			}
 			const op = { op: 'add', id, type: c.type };
+			if (desc.Custom) op.custom = desc.Custom;
 			if (!desc.NonVisual) {
 				Object.assign(op, { parent, parentSlot: slot, x: c.x + (isRoot ? offset : 0), y: c.y + (isRoot ? offset : 0), w: c.w, h: c.h });
 				const parentSpec = isRoot ? findControl(parent) : data.controls.find((p) => p.id === c.parent);
@@ -855,6 +856,15 @@
 		});
 		host.appendChild(search);
 
+		// The project's own controls are read from its source when the
+		// designer opens; ↻ reads them again after adding one.
+		const rescan = document.createElement('button');
+		rescan.className = 'toolbox-rescan';
+		rescan.textContent = '↻ Project controls';
+		rescan.title = 'Look for the project\'s own controls again (types that embed a GoForms control, with a NewX constructor)';
+		rescan.addEventListener('click', () => post({ type: 'rescanToolbox' }));
+		host.appendChild(rescan);
+
 		const filter = toolboxFilter.trim().toLowerCase();
 		const groups = new Map();
 		for (const type of Object.keys(catalog).sort()) {
@@ -885,8 +895,9 @@
 			for (const type of types) {
 				const btn = document.createElement('button');
 				btn.className = 'toolbox-item';
-				btn.textContent = catalog[type].Type || type;
-				btn.title = `Add a new ${type}`;
+				const custom = catalog[type].Custom;
+				btn.textContent = custom ? custom.name : catalog[type].Type || type;
+				btn.title = custom ? `Add a new ${type} (from ${custom.import})` : `Add a new ${type}`;
 				btn.addEventListener('click', () => addControl(type));
 				host.appendChild(btn);
 			}
@@ -936,6 +947,7 @@
 		}
 
 		const id = generateId(type);
+		const custom = desc.Custom;
 		const siblingCount = model.controls.filter(
 			(c) => parentKey(c.parent, c.parentSlot) === parentKey(parent, slot)
 		).length;
@@ -957,7 +969,9 @@
 					y,
 					w: desc.DefaultW,
 					h: desc.DefaultH,
-					text: type,
+					// A project control has no text of its own to seed.
+					text: custom ? undefined : type,
+					custom,
 				},
 			],
 		});
@@ -965,7 +979,10 @@
 	}
 
 	function generateId(type, taken) {
-		const base = type.charAt(0).toLowerCase() + type.slice(1);
+		// A project control is named after its type, not its package:
+		// widgets.Gauge makes gauge1.
+		const name = catalog && catalog[type] && catalog[type].Custom ? catalog[type].Custom.name : type.split('.').pop();
+		const base = name.charAt(0).toLowerCase() + name.slice(1);
 		const existing = taken || new Set(model.controls.map((c) => c.id));
 		let n = 1;
 		while (existing.has(base + n)) {

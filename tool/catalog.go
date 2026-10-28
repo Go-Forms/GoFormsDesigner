@@ -85,6 +85,9 @@ type ControlDesc struct {
 	// what makes parse.go recognize the add calls, apply.go regenerate them
 	// and the webview show a list editor - all from this one entry.
 	Collection *CollectionDesc `json:",omitempty"`
+	// Custom is set for a control of the project's own (see project.go):
+	// where it comes from and how it is constructed.
+	Custom *CustomType `json:",omitempty"`
 	// Descriptions is set only on the catalog command's output: the help
 	// text for each of the type's properties and events, by name (see
 	// descriptions.go).

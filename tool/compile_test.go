@@ -31,39 +31,7 @@ func TestGeneratedCodeCompilesAgainstGoForms(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := t.TempDir()
-	write := func(rel, content string) {
-		p := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	gomod, err := os.ReadFile(filepath.Join(framework, "go.mod"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	gosum, _ := os.ReadFile(filepath.Join(framework, "go.sum"))
-	// The app needs the framework's own requirements; borrowing its go.mod
-	// lines keeps the versions identical to what it was tested with.
-	require := gomod[strings.Index(string(gomod), "require"):]
-	write("go.mod", "module example.com/compilecheck\n\ngo 1.23.0\n\nrequire "+goformsImportPath+" v0.0.0\n\nreplace "+goformsImportPath+" => "+filepath.ToSlash(framework)+"\n\n"+string(require))
-	write("go.sum", string(gosum))
-	write("main.go", `package main
-
-import (
-	"github.com/Go-Forms/GoForms"
-
-	mainform "example.com/compilecheck/Forms/MainForm"
-)
-
-func main() {
-	goforms.NewApplication("com.example.compilecheck")
-	goforms.Run(mainform.NewMainForm().Form)
-}
-`)
+	root, write := compileModule(t, framework, "mainform.NewMainForm().Form", "example.com/compilecheck/Forms/MainForm")
 	write("Forms/MainForm/MainForm-designer.go", `package mainform
 
 import "github.com/Go-Forms/GoForms"
@@ -102,8 +70,10 @@ func (mf *MainForm) initializeComponent() {
 	}
 
 	var types []string
-	for typ := range catalog {
-		types = append(types, typ)
+	for typ, d := range catalog {
+		if d.Custom == nil {
+			types = append(types, typ)
+		}
 	}
 	sort.Strings(types)
 
@@ -141,6 +111,17 @@ func (mf *MainForm) initializeComponent() {
 		Op{Op: "setProp", Prop: "backColor", Value: "#ffffff"},
 		Op{Op: "setProp", Prop: "padding", Value: "4"},
 	)
+	// A control of the project's own, found the way the toolbox finds it.
+	write("Controls/Widgets/widgets.go", gaugeSource)
+	if _, err := projectControls(root); err != nil {
+		t.Fatal(err)
+	}
+	ops = append(ops,
+		Op{Op: "add", ID: "gauge1", Type: "widgets.Gauge", Custom: catalog["widgets.Gauge"].Custom, W: 100, H: 50,
+			Props: map[string]string{"anchor": "AnchorTop,AnchorLeft", "visible": "false"}},
+		Op{Op: "add", ID: "inGauge", Type: "Button", Text: "in", Parent: "gauge1", W: 10, H: 10},
+		Op{Op: "add", ID: "badge1", Type: "widgets.Badge", Custom: catalog["widgets.Badge"].Custom, W: 50, H: 20},
+	)
 	if _, err := applyOps(designer, ops); err != nil {
 		t.Fatal(err)
 	}
@@ -155,11 +136,102 @@ func (mf *MainForm) initializeComponent() {
 		}
 	}
 
+	if out, err := buildWasm(root); err != nil {
+		src, _ := os.ReadFile(designer)
+		t.Fatalf("generated code does not build:\n%s\n--- designer file ---\n%s", out, src)
+	}
+}
+
+// compileModule lays out an app module that builds against the framework
+// checkout, with a main.go running the given form, and returns its root and
+// a writer for further files.
+func compileModule(t *testing.T, framework, run, formImport string) (string, func(rel, content string)) {
+	t.Helper()
+	root := t.TempDir()
+	write := func(rel, content string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gomod, err := os.ReadFile(filepath.Join(framework, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gosum, _ := os.ReadFile(filepath.Join(framework, "go.sum"))
+	// The app needs the framework's own requirements; borrowing its go.mod
+	// lines keeps the versions identical to what it was tested with.
+	require := gomod[strings.Index(string(gomod), "require"):]
+	write("go.mod", "module example.com/compilecheck\n\ngo 1.23.0\n\nrequire "+goformsImportPath+" v0.0.0\n\nreplace "+goformsImportPath+" => "+filepath.ToSlash(framework)+"\n\n"+string(require))
+	write("go.sum", string(gosum))
+	write("main.go", `package main
+
+import (
+	"github.com/Go-Forms/GoForms"
+
+	form "`+formImport+`"
+)
+
+func main() {
+	goforms.NewApplication("com.example.compilecheck")
+	goforms.Run(form.`+strings.TrimPrefix(run, "mainform.")+`)
+}
+`)
+	return root, write
+}
+
+// buildWasm builds the module for js/wasm, which needs no C toolchain.
+func buildWasm(root string) ([]byte, error) {
 	cmd := exec.Command("go", "build", "-o", os.DevNull, ".")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GOOS=js", "GOARCH=wasm", "GOFLAGS=-mod=mod")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		src, _ := os.ReadFile(designer)
-		t.Fatalf("generated code does not build:\n%s\n--- designer file ---\n%s", out, src)
+	return cmd.CombinedOutput()
+}
+
+// TestFormTemplatesBuildAndOpen checks the extension's New Form templates
+// (templates/forms): each one must open in the designer with every control
+// recognized, and build against the framework.
+func TestFormTemplatesBuildAndOpen(t *testing.T) {
+	kinds, err := os.ReadDir(filepath.Join("..", "templates", "forms"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	framework := os.Getenv("GOFORMS_DIR")
+	for _, k := range kinds {
+		t.Run(k.Name(), func(t *testing.T) {
+			sub := func(b []byte) string {
+				return strings.NewReplacer("{{FORM}}", "SampleForm", "{{PACKAGE}}", "sampleform").Replace(string(b))
+			}
+			designer, err := os.ReadFile(filepath.Join("..", "templates", "forms", k.Name(), "FORM-designer.go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			logic, err := os.ReadFile(filepath.Join("..", "templates", "forms", k.Name(), "FORM.go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := writeFixture(t, sub(designer))
+			r, err := parseFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fields := strings.Count(sub(designer), "*goforms.") - 1 // the embedded *goforms.Form
+			if len(r.model.Controls) != fields {
+				t.Errorf("the designer reads %d controls, the template declares %d", len(r.model.Controls), fields)
+			}
+			if framework == "" {
+				return
+			}
+			fw, _ := filepath.Abs(framework)
+			root, write := compileModule(t, fw, "NewSampleForm().Form", "example.com/compilecheck/Forms/SampleForm")
+			write("Forms/SampleForm/SampleForm-designer.go", sub(designer))
+			write("Forms/SampleForm/SampleForm.go", sub(logic))
+			if out, err := buildWasm(root); err != nil {
+				t.Fatalf("template does not build:\n%s", out)
+			}
+		})
 	}
 }

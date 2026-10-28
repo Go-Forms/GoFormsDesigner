@@ -384,3 +384,24 @@ test('a drag on the form background selects what the rectangle touches', () => {
 	assert.ok(el(dom, 'c').classList.contains('selected') || el(dom, 'c').classList.contains('co-selected'));
 	assert.ok(!el(dom, 'b').classList.contains('selected') && !el(dom, 'b').classList.contains('co-selected'));
 });
+
+// --- the project's own controls -------------------------------------------
+
+test('a project control in the toolbox is added with where it comes from', () => {
+	const custom = { import: 'example.com/app/widgets', package: 'widgets', name: 'Gauge', ctor: 'NewGauge', sizeArgs: true, embeds: 'Panel' };
+	catalog['widgets.Gauge'] = desc({ Type: 'widgets.Gauge', Category: 'Project Controls', IsContainer: true, Custom: custom, DefaultW: 200, DefaultH: 100 });
+	try {
+		const dom = boot([]);
+		dom.tabs.controls.dispatch('click', {});
+		const item = dom.el('controls-panel').children.find((c) => c.className === 'toolbox-item' && c.textContent === 'Gauge');
+		assert.ok(item, 'the project control is not in the toolbox');
+		item.dispatch('click', {});
+		const add = lastOps(dom)[0];
+		assert.equal(add.id, 'gauge1');
+		assert.equal(add.type, 'widgets.Gauge');
+		assert.deepEqual(add.custom, custom);
+		assert.equal(add.text, undefined);
+	} finally {
+		delete catalog['widgets.Gauge'];
+	}
+});

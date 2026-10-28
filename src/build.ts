@@ -44,7 +44,7 @@ export interface Project {
 }
 
 /** Walks up from a file or folder to the nearest go.mod. */
-function findGoModUp(from: string): string | undefined {
+export function findGoModUp(from: string): string | undefined {
 	let dir = from;
 	try {
 		if (fs.statSync(dir).isFile()) {
@@ -151,7 +151,7 @@ export function readProject(root: string): Project {
 // The terminal the build runs in
 // ---------------------------------------------------------------------------
 
-interface Step {
+export interface Step {
 	/** Printed before the command, e.g. "Compiling for js/wasm". */
 	label: string;
 	/** The program and its arguments, or a function doing the work here. */
@@ -264,6 +264,13 @@ function quoteForDisplay(s: string): string {
 
 const terminals = new Map<string, { terminal: vscode.Terminal; pty: BuildTerminal }>();
 
+/** Runs steps in the project's GoForms terminal - the one builds use - so
+ * a command the extension runs on the user's behalf is shown, with its
+ * output, the same way a build is. */
+export function runInProjectTerminal(project: Project, title: string, steps: Step[]): Promise<boolean> {
+	return terminalFor(project).run(title, steps);
+}
+
 function terminalFor(project: Project): BuildTerminal {
 	const existing = terminals.get(project.root);
 	if (existing && vscode.window.terminals.includes(existing.terminal)) {
@@ -284,7 +291,7 @@ function terminalFor(project: Project): BuildTerminal {
 /** The environment every Go build step runs under. GOFLAGS is cleared for
  * the same reason as in goTool.ts: a stray -mod=vendor from the user's shell
  * must not turn this into a different kind of build. */
-function goEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+export function goEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 	const offline = vscode.workspace.getConfiguration('goforms').get<boolean>('build.offline') ?? false;
 	const env: NodeJS.ProcessEnv = { GO111MODULE: 'on', GOFLAGS: '', ...extra };
 	if (offline) {

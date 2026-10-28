@@ -139,6 +139,7 @@ func formCallProp(method string) string {
 // keep state across invocations - simpler and always reflects what's really
 // on disk.
 type parseResult struct {
+	path  string
 	fset  *token.FileSet
 	file  *ast.File
 	src   []byte
@@ -288,6 +289,7 @@ func parseFile(path string) (*parseResult, error) {
 	}
 
 	res := &parseResult{
+		path:     path,
 		fset:     fset,
 		file:     f,
 		src:      src,
@@ -638,10 +640,17 @@ func (r *parseResult) visitAssign(s *ast.AssignStmt, recvVar string) {
 		return
 	}
 	funParts, ok := selChain(call.Fun)
-	if !ok || len(funParts) != 2 || funParts[0] != "goforms" {
+	if !ok || len(funParts) != 2 {
 		return
 	}
 	ctor := funParts[1]
+	if funParts[0] != "goforms" {
+		// mf.gauge1 = widgets.NewGauge() - a control of the project's own.
+		if d := r.customFromFile(fieldName, funParts[0], ctor, len(call.Args)); d != nil {
+			r.visitCustom(s, fieldName, d, call)
+		}
+		return
+	}
 
 	if ctor == "NewRadioButtonGroup" {
 		r.groups[fieldName] = &pgroup{
@@ -870,6 +879,35 @@ func (r *parseResult) visitAssign(s *ast.AssignStmt, recvVar string) {
 	r.controls[fieldName] = pc
 }
 
+// visitCustom records a project control's construction. Its only
+// arguments, if any, are its size, as NewPanel's are.
+func (r *parseResult) visitCustom(s *ast.AssignStmt, fieldName string, desc *ControlDesc, call *ast.CallExpr) {
+	spec := &ControlSpec{
+		ID: fieldName, Type: desc.Type, Supported: true,
+		W: desc.DefaultW, H: desc.DefaultH,
+		Props: map[string]string{}, Events: map[string]string{},
+	}
+	if len(call.Args) == 2 {
+		if w, ok := litFloat(call.Args[0]); ok {
+			spec.W = w
+		}
+		if h, ok := litFloat(call.Args[1]); ok {
+			spec.H = h
+		}
+	}
+	r.controls[fieldName] = &pcontrol{
+		spec:        spec,
+		blockStart:  s.Pos(),
+		lastEnd:     s.End(),
+		eventStmts:  map[string]ByteRangeTok{},
+		fieldStmts:  map[string]ByteRangeTok{},
+		callStmts:   map[string]ByteRangeTok{},
+		colStyles:   map[int]TrackSpec{},
+		rowStyles:   map[int]TrackSpec{},
+		setterStmts: map[string]ByteRangeTok{},
+	}
+}
+
 // visitFieldAssign reads `<recv>.<field>.<Name> = <value>` - how the tray
 // components are configured, since a dialog's Title is an exported field and
 // not a SetTitle call.
@@ -995,6 +1033,13 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 	// mf.container.AddControl(mf.field)
 	case len(parts) == 3 && parts[2] == "AddControl":
 		if pc := r.controlArg(call, recvVar); pc != nil {
+			// A project control the file puts children in is a container,
+			// whatever it was registered as.
+			if owner, ok := r.controls[parts[1]]; ok {
+				if d := catalog[owner.spec.Type]; d != nil && d.Custom != nil {
+					d.IsContainer = true
+				}
+			}
 			pc.spec.Parent = parts[1]
 			pc.addCtlRange = ByteRangeTok{Start: s.Pos(), End: s.End()}
 			pc.blockEnd = s.End()

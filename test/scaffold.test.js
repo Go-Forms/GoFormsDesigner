@@ -138,7 +138,9 @@ test('an empty theme body still leaves a valid literal', () => {
 test('every token used by a template is one the extension supplies', () => {
 	// Catches a template that starts using a marker nothing fills in, which
 	// would ship as literal {{BRACES}} in someone's new project.
-	const known = new Set(['MODULE', 'APP_ID', 'APP_NAME', 'REPLACE_BLOCK', 'THEME_CALL', 'THEME_BODY', ...buildTimeTokens]);
+	// FORM and PACKAGE are New Form's, filled in from the name it asks for
+	// (templates/forms).
+	const known = new Set(['MODULE', 'APP_ID', 'APP_NAME', 'REPLACE_BLOCK', 'THEME_CALL', 'THEME_BODY', 'FORM', 'PACKAGE', ...buildTimeTokens]);
 	const seen = new Set();
 	const walk = (dir) => {
 		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

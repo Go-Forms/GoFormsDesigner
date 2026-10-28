@@ -14,6 +14,7 @@
 //	goformsdesigner theme-parse <name-styles.go>
 //	goformsdesigner theme-apply <name-styles.go>   (ops JSON array on stdin)
 //	goformsdesigner set-startup <main.go> <designer.go>
+//	goformsdesigner project-controls <file-or-dir-in-module>
 //	goformsdesigner catalog
 //	goformsdesigner categories
 package main
@@ -22,11 +23,12 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		stderrf("usage: goformsdesigner parse|apply|tidy|theme-parse|theme-apply|ensure-handler|set-startup|catalog|categories ...")
+		stderrf("usage: goformsdesigner parse|apply|tidy|theme-parse|theme-apply|ensure-handler|set-startup|project-controls|catalog|categories ...")
 		os.Exit(2)
 	}
 
@@ -46,6 +48,8 @@ func main() {
 		err = cmdEnsureHandler(os.Args[2:])
 	case "set-startup":
 		err = cmdSetStartup(os.Args[2:])
+	case "project-controls":
+		err = cmdProjectControls(os.Args[2:])
 	case "catalog":
 		err = cmdCatalog()
 	case "categories":
@@ -183,43 +187,7 @@ func cmdThemeApply(args []string) error {
 func cmdCatalog() error {
 	out := make(map[string]*ControlDesc, len(catalog))
 	for name, desc := range catalog {
-		merged := *desc
-		// Merge the inherited ControlBase properties into every type, so the
-		// webview has a single source of truth for what is editable.
-		merged.Setters = map[string]string{}
-		for m, p := range desc.Setters {
-			merged.Setters[m] = p
-		}
-		merged.Kinds = map[string]string{}
-		for p, k := range desc.Kinds {
-			merged.Kinds[p] = k
-		}
-		merged.Enums = map[string][]string{}
-		for p, v := range desc.Enums {
-			merged.Enums[p] = v
-		}
-		// A tray component is not a ControlBase: it has no Anchor, no Dock
-		// and no tab stop, and offering them would write calls that do not
-		// compile.
-		if !desc.NonVisual {
-			for m, p := range baseProps {
-				merged.Setters[m] = p
-				merged.Kinds[p] = basePropKinds[p]
-				if v, ok := basePropEnums[p]; ok {
-					merged.Enums[p] = v
-				}
-			}
-		}
-		merged.OwnEventCount = len(desc.Events)
-		merged.Events = allEventsFor(desc)
-		merged.EventArgs = map[string]string{}
-		for _, ev := range merged.Events {
-			if t, ok := eventArgType(desc, ev); ok {
-				merged.EventArgs[ev] = t
-			}
-		}
-		merged.Descriptions = descriptionsFor(name, propNames(&merged), merged.Events)
-		out[name] = &merged
+		out[name] = mergedDesc(name, desc)
 	}
 
 	// The Form under a reserved key. It is not a control - it cannot be
@@ -239,6 +207,70 @@ func cmdCatalog() error {
 	form.Descriptions = descriptionsFor("Form", propNames(&form), form.Events)
 	out["Form"] = &form
 
+	return printJSON(out)
+}
+
+// mergedDesc is a type as the webview gets it: with the inherited
+// ControlBase properties and events merged in, EventArgs filled in for every
+// event, and the help text for each.
+func mergedDesc(name string, desc *ControlDesc) *ControlDesc {
+	merged := *desc
+	// Merge the inherited ControlBase properties into every type, so the
+	// webview has a single source of truth for what is editable.
+	merged.Setters = map[string]string{}
+	for m, p := range desc.Setters {
+		merged.Setters[m] = p
+	}
+	merged.Kinds = map[string]string{}
+	for p, k := range desc.Kinds {
+		merged.Kinds[p] = k
+	}
+	merged.Enums = map[string][]string{}
+	for p, v := range desc.Enums {
+		merged.Enums[p] = v
+	}
+	// A tray component is not a ControlBase: it has no Anchor, no Dock
+	// and no tab stop, and offering them would write calls that do not
+	// compile.
+	if !desc.NonVisual {
+		for m, p := range baseProps {
+			merged.Setters[m] = p
+			merged.Kinds[p] = basePropKinds[p]
+			if v, ok := basePropEnums[p]; ok {
+				merged.Enums[p] = v
+			}
+		}
+	}
+	merged.OwnEventCount = len(desc.Events)
+	merged.Events = allEventsFor(desc)
+	merged.EventArgs = map[string]string{}
+	for _, ev := range merged.Events {
+		if t, ok := eventArgType(desc, ev); ok {
+			merged.EventArgs[ev] = t
+		}
+	}
+	merged.Descriptions = descriptionsFor(name, propNames(&merged), merged.Events)
+	return &merged
+}
+
+// cmdProjectControls lists the project's own controls (see project.go), in
+// the shape the catalog command gives every framework type.
+func cmdProjectControls(args []string) error {
+	if len(args) != 1 {
+		return errUsage("project-controls <file-or-dir-in-module>")
+	}
+	dir := args[0]
+	if st, err := os.Stat(dir); err == nil && !st.IsDir() {
+		dir = filepath.Dir(dir)
+	}
+	found, err := projectControls(dir)
+	if err != nil {
+		return err
+	}
+	out := map[string]*ControlDesc{}
+	for _, d := range found {
+		out[d.Type] = mergedDesc(d.Type, d)
+	}
 	return printJSON(out)
 }
 

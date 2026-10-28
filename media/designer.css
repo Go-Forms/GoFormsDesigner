@@ -2328,3 +2328,15 @@ body {
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
+
+/* The toolbox's "look again" for the project's own controls. */
+.toolbox-rescan {
+	display: block;
+	margin: 6px 0 2px;
+	border: none;
+	background: none;
+	padding: 0;
+	color: var(--vscode-textLink-foreground, #3794ff);
+	cursor: pointer;
+	font-size: 11px;
+}

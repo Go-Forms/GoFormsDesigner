@@ -26,6 +26,7 @@ type InboundMessage =
 	| { type: 'copy'; data: unknown }
 	| { type: 'paste' }
 	| { type: 'viewCode' }
+	| { type: 'rescanToolbox' }
 	| { type: 'setStartup' }
 	| { type: 'undo' }
 	| { type: 'redo' }
@@ -101,6 +102,18 @@ class DesignerDocumentSession {
 			this.post({ type: 'parseError', message: describeError(err) });
 			return;
 		}
+		// The project's own controls go first in the toolbox, as Visual
+		// Studio puts a project's components at the top. A module that cannot
+		// be read only costs that group, never the designer.
+		try {
+			const own = await this.tool.projectControls(filePath);
+			if (Object.keys(own).length) {
+				catalog = { ...catalog, ...own };
+				categories = ['Project Controls', ...categories.filter((c) => c !== 'Project Controls')];
+			}
+		} catch {
+			// no go.mod, or a package that does not parse: no group
+		}
 
 		try {
 			const model = await this.tool.parse(filePath);
@@ -174,6 +187,10 @@ class DesignerDocumentSession {
 
 			case 'viewCode':
 				await vscode.commands.executeCommand('goforms.viewCode');
+				return;
+
+			case 'rescanToolbox':
+				await this.sendInit();
 				return;
 
 			case 'setStartup':

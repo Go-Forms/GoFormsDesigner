@@ -1,0 +1,10 @@
+package {{PACKAGE}}
+
+import "github.com/Go-Forms/GoForms"
+
+// {{FORM}}.go is the hand-written half of the form: event handlers and
+// logic. Layout lives in {{FORM}}-designer.go.
+
+func (f *{{FORM}}) btnOK_Click(sender any, e goforms.MouseEventArgs) {
+	f.Close()
+}

@@ -81,6 +81,9 @@ func applyOps(path string, ops []Op) (*FormModel, error) {
 	if _, err := reorderFile(path); err != nil {
 		return rollback(err)
 	}
+	if err := pruneImports(path); err != nil {
+		return rollback(err)
+	}
 
 	// gofmt once the whole batch is in. An op is a text splice, so it has no
 	// idea that inserting `comboBox1 *goforms.ComboBox` has just widened the
@@ -784,6 +787,18 @@ func planAdd(r *parseResult, op Op) ([]edit, error) {
 	if _, exists := r.controls[op.ID]; exists {
 		return nil, fmt.Errorf("control %q already exists", op.ID)
 	}
+	if op.Custom != nil {
+		if err := validateGoIdent(op.Custom.Package); err != nil {
+			return nil, fmt.Errorf("project control package: %w", err)
+		}
+		if op.Custom.Import == "" || strings.ContainsAny(op.Custom.Import, "\"\n ") {
+			return nil, fmt.Errorf("project control %s has no usable import path", op.Custom.Name)
+		}
+		if customKey(op.Custom) != op.Type {
+			return nil, fmt.Errorf("project control %s is described as %s", op.Type, customKey(op.Custom))
+		}
+		registerCustom(op.Custom, containerEmbeds[op.Custom.Embeds])
+	}
 	if _, ok := catalog[op.Type]; !ok {
 		return nil, fmt.Errorf("unknown control type %q", op.Type)
 	}
@@ -834,6 +849,15 @@ func planAdd(r *parseResult, op Op) ([]edit, error) {
 		}
 	}
 
+	var imports []string
+	if c := catalog[op.Type].Custom; c != nil {
+		alias, add := importAlias(r, c)
+		spec.alias = alias
+		if add != "" {
+			imports = append(imports, add)
+		}
+	}
+
 	block, err := controlBlock(r.model.RecvVar, spec, parentTypeOf(r, op.Parent), "\t")
 	if err != nil {
 		return nil, err
@@ -858,7 +882,10 @@ func planAdd(r *parseResult, op Op) ([]edit, error) {
 	// time.Now() - brings its import with it, in the same atomic batch.
 	// Without this, dropping one from the palette wrote a file that did not
 	// compile (see imports.go).
-	return append(edits, planImportEdits(r, catalog[op.Type].Imports)...), nil
+	for _, p := range catalog[op.Type].Imports {
+		imports = append(imports, strconv.Quote(p))
+	}
+	return append(edits, planImportEdits(r, imports)...), nil
 }
 
 // endsWithBlankLine reports whether the text before off already ends in an

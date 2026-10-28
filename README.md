@@ -86,7 +86,8 @@ has New Form and New Theme.
 | Command | What it does |
 | --- | --- |
 | **GoForms: Create New Project…** | Scaffolds a project — go.mod, main.go, a first form, build tasks, a .gitignore. Asks for a template (empty, example, web, android) and a look. Also a button on the Explorer's welcome screen when there is no project open. |
-| **GoForms: New Form…** | Adds a `Forms/<Name>/` pair: the designer file and the hand-written one. |
+| **GoForms: New Form…** | Adds a `Forms/<Name>/` pair: the designer file and the hand-written one. Offers an empty form, a dialog with OK and Cancel, an About box, a login form and a splash screen. |
+| **GoForms: Set as Startup Form** | Points `goforms.Run` in main.go at the form, swapping the import - as Visual Studio rewrites `Application.Run`. Also in a designer file's right-click menu, in the Explorer and on the canvas. |
 | **GoForms: New Theme…** | Writes `<project>-styles.go` into a project created without one, from the same starting points the wizard offers, and adds the `SetTheme` call to main(). |
 
 Components — a Timer, the four dialogs — are in the toolbox under
@@ -128,6 +129,7 @@ Timer you cannot rename, configure or delete without leaving the designer.
 | Command | What it does |
 | --- | --- |
 | **GoForms: Check Setup** | Reports which Go was found and everywhere it looked, whether the helper builds, and what is present for WebAssembly and Android. |
+| **GoForms: Check for Updates…** | Asks Go whether the GoForms framework each project uses, or Go itself, has a newer release, and updates what you tick: `go get` and `go mod tidy` in the project's terminal, the Go install command typed into a terminal for you to run. The extension's own update is the marketplace's. |
 | **GoForms: Set Framework Path…** | Points a project at a local GoForms checkout. |
 | **GoForms: Set Android NDK Path…** | For an NDK somewhere the search does not cover. |
 | **GoForms: Set fyne CLI Path…** | Likewise for the fyne tool. |

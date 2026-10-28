@@ -36,6 +36,16 @@ func ctorCall(spec *ControlSpec, recvVar string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unknown control type %q", spec.Type)
 	}
+	if c := desc.Custom; c != nil {
+		alias := spec.alias
+		if alias == "" {
+			alias = c.Package
+		}
+		if c.SizeArgs {
+			return fmt.Sprintf("%s.%s(%s, %s)", alias, c.Ctor, fnum(spec.W), fnum(spec.H)), nil
+		}
+		return fmt.Sprintf("%s.%s()", alias, c.Ctor), nil
+	}
 	switch spec.Type {
 	case "Label", "Button", "CheckBox", "RadioButton":
 		return fmt.Sprintf("goforms.New%s(%s)", spec.Type, quote(spec.Text)), nil
@@ -437,5 +447,12 @@ func normalizedDepths(items []CollectionItem) []int {
 // fieldDecl renders the struct field line for a control, e.g.
 // "\tbtnGreet *goforms.Button\n".
 func fieldDecl(spec *ControlSpec, indent string) string {
+	if d := catalog[spec.Type]; d != nil && d.Custom != nil {
+		alias := spec.alias
+		if alias == "" {
+			alias = d.Custom.Package
+		}
+		return fmt.Sprintf("%s%s *%s.%s\n", indent, spec.ID, alias, d.Custom.Name)
+	}
 	return fmt.Sprintf("%s%s *goforms.%s\n", indent, spec.ID, spec.Type)
 }

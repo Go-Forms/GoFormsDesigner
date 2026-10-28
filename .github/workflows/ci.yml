@@ -95,7 +95,7 @@ jobs:
         working-directory: tool
         env:
           GOFORMS_DIR: ${{ github.workspace }}/goforms-framework
-        run: go test -run TestGeneratedCodeCompilesAgainstGoForms -v .
+        run: go test -run 'TestGeneratedCodeCompilesAgainstGoForms|TestFormTemplatesBuildAndOpen' -v .
 
   package:
     name: Package VSIX
