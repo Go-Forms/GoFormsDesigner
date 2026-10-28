@@ -73,6 +73,17 @@ type pcontrol struct {
 	// nodeVars maps a local variable bound to an AddNode result to that
 	// node's depth, so `mf.tv.AddNode(node1, "Child")` knows how deep it is.
 	nodeVars map[string]int
+	// tableCountArgs are a TableLayoutPanel constructor's column and row
+	// count arguments, which "setTable" rewrites in place.
+	tableCountArgs []ast.Expr
+	// colStyles/rowStyles collect a table's SetColumnStyle/SetRowStyle calls
+	// by index until the file has been read; trackStmts spans those calls
+	// in file order, for "setTable" to rewrite (see table.go).
+	colStyles, rowStyles map[int]TrackSpec
+	trackStmts           []ByteRangeTok
+	// setterStmts spans each single-value setter call by prop name, so
+	// "resetProp" can delete the line that sets it.
+	setterStmts map[string]ByteRangeTok
 }
 
 // ByteRangeTok mirrors ByteRange but in token.Pos terms, before conversion
@@ -91,8 +102,10 @@ type pgroup struct {
 // instead of appending a second one that says something different.
 type pform struct {
 	singleArgs map[string]ast.Expr
-	callStmts  map[string]ByteRangeTok
-	eventStmts map[string]ByteRangeTok
+	// setterStmts spans each `<recv>.SetXxx(v)` call by prop, for resetProp.
+	setterStmts map[string]ByteRangeTok
+	callStmts   map[string]ByteRangeTok
+	eventStmts  map[string]ByteRangeTok
 	// anchor is the end of the last statement about the form, which is where
 	// a new one goes. The form's settings stay together at the top of
 	// initializeComponent, above the controls, which is both how a hand-
@@ -103,9 +116,10 @@ type pform struct {
 
 func newPForm() *pform {
 	return &pform{
-		singleArgs: map[string]ast.Expr{},
-		callStmts:  map[string]ByteRangeTok{},
-		eventStmts: map[string]ByteRangeTok{},
+		singleArgs:  map[string]ast.Expr{},
+		setterStmts: map[string]ByteRangeTok{},
+		callStmts:   map[string]ByteRangeTok{},
+		eventStmts:  map[string]ByteRangeTok{},
 	}
 }
 
@@ -437,6 +451,12 @@ func parseFile(path string) (*parseResult, error) {
 		}
 		pc.spec.Range = byteRange(fset, pc.blockStart, end)
 		syncGridColumns(pc.spec)
+		if pc.spec.Type == "TableLayoutPanel" {
+			cols, _ := strconv.Atoi(pc.spec.Props["columns"])
+			rows, _ := strconv.Atoi(pc.spec.Props["rows"])
+			pc.spec.TableColumns = tableTracks(cols, pc.colStyles)
+			pc.spec.TableRows = tableTracks(rows, pc.rowStyles)
+		}
 		res.model.Controls = append(res.model.Controls, pc.spec)
 	}
 	for _, g := range res.groups {
@@ -646,12 +666,15 @@ func (r *parseResult) visitAssign(s *ast.AssignStmt, recvVar string) {
 		Events:    map[string]string{},
 	}
 	pc := &pcontrol{
-		spec:       spec,
-		blockStart: s.Pos(),
-		lastEnd:    s.End(),
-		eventStmts: map[string]ByteRangeTok{},
-		fieldStmts: map[string]ByteRangeTok{},
-		callStmts:  map[string]ByteRangeTok{},
+		spec:        spec,
+		blockStart:  s.Pos(),
+		lastEnd:     s.End(),
+		eventStmts:  map[string]ByteRangeTok{},
+		fieldStmts:  map[string]ByteRangeTok{},
+		callStmts:   map[string]ByteRangeTok{},
+		colStyles:   map[int]TrackSpec{},
+		rowStyles:   map[int]TrackSpec{},
+		setterStmts: map[string]ByteRangeTok{},
 	}
 	if desc.NonVisual {
 		// Nothing later will finalize a tray component - there is no
@@ -742,6 +765,7 @@ func (r *parseResult) visitAssign(s *ast.AssignStmt, recvVar string) {
 			if v, ok := litFloat(call.Args[3]); ok {
 				spec.Props["rows"] = strconv.FormatFloat(v, 'g', -1, 64)
 			}
+			pc.tableCountArgs = call.Args[2:4]
 		}
 	case "SplitContainer":
 		if len(call.Args) >= 3 {
@@ -945,6 +969,7 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 			r.model.FormProps[prop] = v
 			r.form.singleArgs[prop] = call.Args[0]
 		}
+		r.form.setterStmts[prop] = ByteRangeTok{Start: s.Pos(), End: s.End()}
 		r.form.anchor = maxPos(r.form.anchor, s.End())
 
 	// mf.Load.Handle(mf.MainForm_Load) - the Form's own events. A control's
@@ -975,6 +1000,27 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 			pc.blockEnd = s.End()
 			r.order = append(r.order, pc.spec.ID)
 		}
+
+	// mf.table.AddControlAt(mf.field, col, row) and AddControlSpanning(...,
+	// colSpan, rowSpan) - a TableLayoutPanel's child, in the cell it names.
+	case len(parts) == 3 && (parts[2] == "AddControlAt" || parts[2] == "AddControlSpanning"):
+		if child, method, ok := addedChild(call); ok {
+			if pc := r.controlExpr(child, recvVar); pc != nil {
+				pc.spec.Parent = parts[1]
+				pc.spec.Cell = readCell(method, call.Args)
+				pc.addCtlRange = ByteRangeTok{Start: s.Pos(), End: s.End()}
+				pc.blockEnd = s.End()
+				r.order = append(r.order, pc.spec.ID)
+			}
+		}
+
+	// mf.table.SetColumnStyle(0, goforms.Absolute(80)) - indexed, like a
+	// grid's column setters, so it cannot go through applySetter.
+	case len(parts) == 3 && r.isTrackSetterOn(parts[1], parts[2]):
+		pc := r.controls[parts[1]]
+		r.applyTrackSetter(pc, parts[2], call.Args)
+		pc.trackStmts = append(pc.trackStmts, ByteRangeTok{Start: s.Pos(), End: s.End()})
+		pc.lastEnd = maxPos(pc.lastEnd, s.End())
 
 	// mf.group.Add(mf.field)
 	case len(parts) == 3 && parts[2] == "Add":
@@ -1035,7 +1081,9 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 	// mf.field.SetXxx(args...)
 	case len(parts) == 3:
 		if pc, ok := r.controls[parts[1]]; ok {
-			r.applySetter(pc, parts[2], call.Args)
+			if prop := r.applySetter(pc, parts[2], call.Args); prop != "" {
+				pc.setterStmts[prop] = ByteRangeTok{Start: s.Pos(), End: s.End()}
+			}
 			pc.lastEnd = maxPos(pc.lastEnd, s.End())
 		}
 	}
@@ -1169,14 +1217,29 @@ func (r *parseResult) controlArg(call *ast.CallExpr, recvVar string) *pcontrol {
 	if len(call.Args) != 1 {
 		return nil
 	}
-	parts, ok := selChain(call.Args[0])
+	return r.controlExpr(call.Args[0], recvVar)
+}
+
+// controlExpr resolves a `<recvVar>.<field>` expression to its control.
+func (r *parseResult) controlExpr(e ast.Expr, recvVar string) *pcontrol {
+	parts, ok := selChain(e)
 	if !ok || len(parts) != 2 || parts[0] != recvVar {
 		return nil
 	}
 	return r.controls[parts[1]]
 }
 
-func (r *parseResult) applySetter(pc *pcontrol, method string, args []ast.Expr) {
+// isTrackSetterOn reports whether field.method is a table's track style.
+func (r *parseResult) isTrackSetterOn(field, method string) bool {
+	pc, ok := r.controls[field]
+	return ok && isTrackSetter(pc.spec.Type, method)
+}
+
+// applySetter reads one setter call into the model and reports the prop it
+// sets when the call is the only statement that sets it - the line
+// "resetProp" deletes. SetBounds and the two-value SetRange are not such
+// lines: resetting either would mean something other than deleting it.
+func (r *parseResult) applySetter(pc *pcontrol, method string, args []ast.Expr) string {
 	desc := catalog[pc.spec.Type]
 	switch method {
 	case "SetBounds":
@@ -1195,7 +1258,7 @@ func (r *parseResult) applySetter(pc *pcontrol, method string, args []ast.Expr) 
 				pc.spec.H = h
 			}
 		}
-		return
+		return ""
 	case "SetItems":
 		if len(args) == 1 {
 			if cl, ok := args[0].(*ast.CompositeLit); ok {
@@ -1208,7 +1271,7 @@ func (r *parseResult) applySetter(pc *pcontrol, method string, args []ast.Expr) 
 				pc.itemsRange = &ByteRangeTok{Start: cl.Lbrace + 1, End: cl.Rbrace}
 			}
 		}
-		return
+		return ""
 	case "LoadFile":
 		if len(args) == 1 {
 			if txt, ok := litString(args[0]); ok {
@@ -1216,7 +1279,7 @@ func (r *parseResult) applySetter(pc *pcontrol, method string, args []ast.Expr) 
 			}
 			pc.setSingleArg("file", args[0])
 		}
-		return
+		return "file"
 	case "SetSizeMode":
 		if len(args) == 1 {
 			if parts, ok := selChain(args[0]); ok {
@@ -1224,7 +1287,7 @@ func (r *parseResult) applySetter(pc *pcontrol, method string, args []ast.Expr) 
 			}
 			pc.setSingleArg("sizeMode", args[0])
 		}
-		return
+		return "sizeMode"
 	case "SetRange":
 		if len(args) == 2 {
 			if min, ok := litFloat(args[0]); ok {
@@ -1234,7 +1297,7 @@ func (r *parseResult) applySetter(pc *pcontrol, method string, args []ast.Expr) 
 				pc.spec.Props["max"] = strconv.FormatFloat(max, 'g', -1, 64)
 			}
 		}
-		return
+		return ""
 	case "SetValue":
 		if len(args) == 1 {
 			if v, ok := litFloat(args[0]); ok {
@@ -1242,7 +1305,7 @@ func (r *parseResult) applySetter(pc *pcontrol, method string, args []ast.Expr) 
 			}
 			pc.setSingleArg("value", args[0])
 		}
-		return
+		return "value"
 	}
 
 	if prop, ok := setterProp(desc, method); ok && len(args) == 1 {
@@ -1254,7 +1317,9 @@ func (r *parseResult) applySetter(pc *pcontrol, method string, args []ast.Expr) 
 				pc.textArg = args[0]
 			}
 		}
+		return prop
 	}
+	return ""
 }
 
 // readPropValue converts one setter argument node back to the plain string
@@ -1286,6 +1351,12 @@ func readPropValue(arg ast.Expr, kind string) (string, bool) {
 			return "", false
 		}
 		return strings.Join(names, ","), true
+	case KindColor:
+		return readColor(arg)
+	case KindFont:
+		return readFont(arg)
+	case KindPadding:
+		return readPadding(arg)
 	default:
 		if txt, ok := litString(arg); ok {
 			return txt, true

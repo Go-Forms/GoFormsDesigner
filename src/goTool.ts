@@ -41,6 +41,22 @@ export interface GridColumnSpec {
 	buttonText?: string;
 }
 
+/** Where a control sits in a TableLayoutPanel. Mirrors the tool's CellSpec;
+ * a span of 0 or absent means one. */
+export interface CellSpec {
+	column: number;
+	row: number;
+	columnSpan?: number;
+	rowSpan?: number;
+}
+
+/** One column or row of a TableLayoutPanel. Mirrors the tool's TrackSpec. */
+export interface TrackSpec {
+	type: 'Absolute' | 'Percent' | 'AutoSize';
+	/** Pixels for Absolute, a percentage for Percent. */
+	value?: number;
+}
+
 export interface ControlSpec {
 	id: string;
 	type: string;
@@ -63,6 +79,13 @@ export interface ControlSpec {
 	props?: Record<string, string>;
 	events?: Record<string, string>;
 	group?: string;
+	/** The cell this control is in, when its TableLayoutPanel names one. */
+	cell?: CellSpec;
+	/** A TableLayoutPanel's columns and rows. */
+	tableColumns?: TrackSpec[];
+	tableRows?: TrackSpec[];
+	/** Set when a track style is code the tool can't regenerate. */
+	tableReadOnly?: boolean;
 	supported: boolean;
 	range: ByteRange;
 }
@@ -100,7 +123,11 @@ export interface Op {
 		| 'remove'
 		| 'setParent'
 		| 'setForm'
-		| 'rename';
+		| 'rename'
+		| 'resetProp'
+		| 'reorder'
+		| 'setCell'
+		| 'setTable';
 	/** Unused (pass "") for "setForm", which resizes the Form itself rather
 	 * than a specific control. */
 	id: string;
@@ -123,6 +150,25 @@ export interface Op {
 	value?: string;
 	event?: string;
 	handler?: string;
+	/** For "add": a control created already configured - a paste. */
+	props?: Record<string, string>;
+	events?: Record<string, string>;
+	/** For "add", "setParent" and "setCell": the TableLayoutPanel cell. */
+	cell?: CellSpec;
+	/** For "reorder": every child of the container (`id`, `parentSlot`),
+	 * back to front - the order their AddControl calls run in. */
+	order?: string[];
+	/** For "setTable" (and "add"): the complete column and row lists. */
+	tableColumns?: TrackSpec[];
+	tableRows?: TrackSpec[];
+}
+
+/** What `set-startup` did to main.go. Mirrors the tool's StartupResult. */
+export interface StartupResult {
+	file: string;
+	changed: boolean;
+	/** The expression goforms.Run is now given. */
+	form: string;
 }
 
 /** What `tidy` dropped from a designer file. Mirrors the Go TidyResult
@@ -213,6 +259,8 @@ export interface ControlDesc {
 	Setters: Record<string, string>;
 	Events: string[];
 	Collection?: CollectionDesc;
+	/** Help text for each property and event, by name. */
+	Descriptions?: Record<string, string>;
 }
 
 /** Thrown when no `go` executable could be found. The message names every
@@ -453,6 +501,11 @@ export class GoFormsTool {
 	 * is atomic: a failure leaves the file exactly as it was. */
 	async themeApply(stylesPath: string, ops: ThemeOp[]): Promise<ThemeModel> {
 		return JSON.parse(await this.run(['theme-apply', stylesPath], JSON.stringify(ops)));
+	}
+
+	/** Points main.go's goforms.Run at the form a designer file declares. */
+	async setStartup(mainPath: string, designerPath: string): Promise<StartupResult> {
+		return JSON.parse(await this.run(['set-startup', mainPath, designerPath])) as StartupResult;
 	}
 
 	async catalog(): Promise<Record<string, ControlDesc>> {

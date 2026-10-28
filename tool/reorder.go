@@ -27,6 +27,7 @@ package main
 // of a block it mentions, a parent cycle - leaves the file untouched.
 
 import (
+	"fmt"
 	"go/ast"
 	"go/format"
 	"os"
@@ -64,8 +65,18 @@ func reorderFile(path string) (int, error) {
 // no edits at all when the file is already in order - or when it is not shaped
 // in a way this pass can safely permute (see the file comment).
 func planReorder(r *parseResult) ([]edit, error) {
+	edits, _ := planBlockOrder(r, func(order []string) []string { return parentsFirst(r, order) })
+	return edits, nil
+}
+
+// planBlockOrder is the machinery under planReorder and the "reorder" op:
+// it asks want for the block order it should produce, given the order in
+// the file, and returns the edits that permute the blocks into it. ok is
+// false when the file is not shaped in a way blocks can be safely moved in
+// (see the file comment); no edits with ok true means nothing had to move.
+func planBlockOrder(r *parseResult, want func(order []string) []string) (edits []edit, ok bool) {
 	if r.initBody == nil {
-		return nil, nil
+		return nil, false
 	}
 	stmts := r.initBody.List
 
@@ -91,14 +102,14 @@ func planReorder(r *parseResult) ([]edit, error) {
 		last[id] = i
 	}
 	if len(order) < 2 {
-		return nil, nil
+		return nil, true
 	}
 	// The run has to be unbroken, or "the block" is not a thing that can be
 	// picked up and put down somewhere else.
 	for _, id := range order {
 		for i := first[id]; i <= last[id]; i++ {
 			if owners[i] != id {
-				return nil, nil
+				return nil, false
 			}
 		}
 	}
@@ -108,9 +119,9 @@ func planReorder(r *parseResult) ([]edit, error) {
 		slotOf[id] = k
 	}
 
-	desired := parentsFirst(r, order)
+	desired := want(order)
 	if desired == nil {
-		return nil, nil // a parent cycle; not this pass's problem to solve
+		return nil, false // a parent cycle; not this pass's problem to solve
 	}
 	moves := false
 	for k, id := range desired {
@@ -120,7 +131,7 @@ func planReorder(r *parseResult) ([]edit, error) {
 		}
 	}
 	if !moves {
-		return nil, nil
+		return nil, true
 	}
 	newSlotOf := make(map[string]int, len(desired))
 	for k, id := range desired {
@@ -141,7 +152,7 @@ func planReorder(r *parseResult) ([]edit, error) {
 				continue
 			}
 			if (last[order[k]] < i) != (last[order[newSlotOf[ref]]] < i) {
-				return nil, nil
+				return nil, false
 			}
 		}
 	}
@@ -154,7 +165,7 @@ func planReorder(r *parseResult) ([]edit, error) {
 		s, e := wholeLines(r.src, offset(r.fset, stmts[first[id]].Pos()), offset(r.fset, stmts[last[id]].End()))
 		spans[k] = [2]int{s, e}
 		if k > 0 && spans[k-1][1] > s {
-			return nil, nil // two blocks sharing a line: not separable
+			return nil, false // two blocks sharing a line: not separable
 		}
 	}
 
@@ -163,14 +174,13 @@ func planReorder(r *parseResult) ([]edit, error) {
 		texts[k] = string(r.src[spans[k][0]:spans[k][1]])
 	}
 
-	var edits []edit
 	for k, id := range desired {
 		if order[k] == id {
 			continue
 		}
 		edits = append(edits, edit{spans[k][0], spans[k][1], texts[slotOf[id]]})
 	}
-	return edits, nil
+	return edits, true
 }
 
 // parentsFirst returns the block order in which no control comes before its
@@ -241,8 +251,8 @@ func callOwner(r *parseResult, e ast.Expr) string {
 	if !ok {
 		return ""
 	}
-	if sel, isSel := call.Fun.(*ast.SelectorExpr); isSel && sel.Sel.Name == "AddControl" && len(call.Args) == 1 {
-		if parts, isChain := selChain(call.Args[0]); isChain && len(parts) == 2 && parts[0] == r.model.RecvVar {
+	if child, _, isAdd := addedChild(call); isAdd {
+		if parts, isChain := selChain(child); isChain && len(parts) == 2 && parts[0] == r.model.RecvVar {
 			if _, known := r.controls[parts[1]]; known {
 				return parts[1]
 			}
@@ -279,4 +289,68 @@ func stmtRefs(r *parseResult, stmt ast.Stmt) []string {
 		return true
 	})
 	return out
+}
+
+// planReorderOp is the "reorder" op: it puts the children of one container
+// in the order given, back to front. That order is the order their blocks -
+// and so their AddControl calls - run in, which is everything z-order means
+// here: the framework draws the last child added on top, docks the children
+// in the order they were added, and flows a FlowLayoutPanel's children in
+// that order too. Bring to Front and Send to Back are this op with one ID
+// moved to an end.
+//
+// Only the named blocks trade places, among the positions they already
+// hold; their own children follow them because every block is then put back
+// after its parent's.
+func planReorderOp(r *parseResult, op Op) ([]edit, error) {
+	if op.ID != "" {
+		if _, err := mustControl(r, op.ID); err != nil {
+			return nil, err
+		}
+	}
+	var siblings []string
+	for _, c := range r.model.Controls {
+		if c.Parent == op.ID && c.ParentSlot == op.ParentSlot && !isNonVisual(c.Type) {
+			siblings = append(siblings, c.ID)
+		}
+	}
+	if len(op.Order) != len(siblings) {
+		return nil, fmt.Errorf("reorder names %d controls, but %s holds %d", len(op.Order), containerName(op), len(siblings))
+	}
+	want := map[string]bool{}
+	for _, id := range op.Order {
+		want[id] = true
+	}
+	for _, id := range siblings {
+		if !want[id] {
+			return nil, fmt.Errorf("reorder leaves out %q, which is in %s", id, containerName(op))
+		}
+	}
+
+	edits, ok := planBlockOrder(r, func(order []string) []string {
+		out := append([]string(nil), order...)
+		next := 0
+		for i, id := range out {
+			if want[id] {
+				out[i] = op.Order[next]
+				next++
+			}
+		}
+		return parentsFirst(r, out)
+	})
+	if !ok {
+		return nil, fmt.Errorf("initializeComponent mixes the controls' statements with hand-written code, so their order cannot be changed safely - reorder the AddControl calls by hand")
+	}
+	return edits, nil
+}
+
+// containerName describes the container a reorder addresses, for errors.
+func containerName(op Op) string {
+	switch {
+	case op.ID == "":
+		return "the form"
+	case op.ParentSlot != "":
+		return op.ID + "." + op.ParentSlot
+	}
+	return op.ID
 }

@@ -137,7 +137,7 @@ func ctorCall(spec *ControlSpec, recvVar string) (string, error) {
 	case "TableLayoutPanel":
 		return fmt.Sprintf("goforms.NewTableLayoutPanel(%s, %s, %s, %s)",
 			fnum(spec.W), fnum(spec.H),
-			numOrDefault(spec, "columns", "2"), numOrDefault(spec, "rows", "2")), nil
+			tableCount(spec, spec.TableColumns, "columns"), tableCount(spec, spec.TableRows, "rows")), nil
 	case "SplitContainer":
 		vertical := "true"
 		if spec.Props["orientation"] == "horizontal" {
@@ -217,6 +217,7 @@ func controlBlock(recvVar string, spec *ControlSpec, parentType, indent string) 
 	// `mf.<gone>.AddButton(...)` lines behind.
 	b.WriteString(collectionLines(recvVar, spec, indent))
 	b.WriteString(columnLines(recvVar, spec, indent))
+	b.WriteString(tableLines(recvVar, spec, indent))
 
 	if nonVisual {
 		// No AddControl: a Timer is not on the form. The Start() call, if
@@ -226,7 +227,7 @@ func controlBlock(recvVar string, spec *ControlSpec, parentType, indent string) 
 		return b.String(), nil
 	}
 
-	b.WriteString(addControlLine(recvVar, spec.ID, spec.Parent, parentType, spec.ParentSlot, indent))
+	b.WriteString(addControlLine(recvVar, spec.ID, spec.Parent, parentType, spec.ParentSlot, spec.Cell, indent))
 	return b.String(), nil
 }
 
@@ -287,8 +288,14 @@ func callLines(recvVar string, spec *ControlSpec, desc *ControlDesc, indent stri
 // of the four kinds of container holds it. parentType is the parent's control
 // type ("" when the parent is the Form itself), which is what decides whether
 // a slot is an accessor call or a page variable.
-func addControlLine(recvVar, id, parent, parentType, slot, indent string) string {
-	return fmt.Sprintf("%s%s.AddControl(%s.%s)\n", indent, containerExpr(recvVar, parent, parentType, slot), recvVar, id)
+//
+// cell places the control in a TableLayoutPanel; it is ignored for any
+// other parent, where AddControlAt does not exist.
+func addControlLine(recvVar, id, parent, parentType, slot string, cell *CellSpec, indent string) string {
+	if parentType != "TableLayoutPanel" || slot != "" {
+		cell = nil
+	}
+	return fmt.Sprintf("%s%s.%s\n", indent, containerExpr(recvVar, parent, parentType, slot), addCall(recvVar, id, cell))
 }
 
 // containerExpr renders the Go expression that owns a control's children:

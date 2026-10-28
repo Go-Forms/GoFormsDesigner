@@ -80,6 +80,23 @@ jobs:
         working-directory: tool
         run: go test ./...
 
+      # What the tool writes has to build against the real framework, not
+      # just parse. The js/wasm target needs no C toolchain or GL headers, so
+      # this runs on the stock runner.
+      - name: Check out GoForms
+        if: runner.os == 'Linux'
+        uses: actions/checkout@v4
+        with:
+          repository: Go-Forms/GoForms
+          path: goforms-framework
+
+      - name: Build generated code against GoForms
+        if: runner.os == 'Linux'
+        working-directory: tool
+        env:
+          GOFORMS_DIR: ${{ github.workspace }}/goforms-framework
+        run: go test -run TestGeneratedCodeCompilesAgainstGoForms -v .
+
   package:
     name: Package VSIX
     runs-on: ubuntu-latest

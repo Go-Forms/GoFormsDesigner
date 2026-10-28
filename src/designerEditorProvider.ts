@@ -6,6 +6,7 @@
 // it is purely: load model -> send to webview -> receive user actions ->
 // call GoFormsTool -> send fresh model back.
 import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { GoFormsTool, FormModel, ControlDesc } from './goTool';
 
@@ -105,6 +106,7 @@ class DesignerDocumentSession {
 					// Snapshot before mutating: the Go tool rewrites the file
 					// on disk rather than through a TextDocument edit, so
 					// VS Code's own undo stack never sees these changes.
+					await this.saveFormFiles(filePath);
 					this.pushUndo(filePath);
 					await this.ensureStubs(filePath, message.handlers);
 					const model = await this.tool.apply(filePath, message.ops);
@@ -169,31 +171,48 @@ class DesignerDocumentSession {
 	 * through the Go tool, which writes it directly, so the editor's normal
 	 * undo does not cover designer actions - this is the designer's own
 	 * history.
+	 *
+	 * A snapshot holds the whole form, not just the designer file: a rename
+	 * also rewrites the hand-written half, and wiring an event writes a stub
+	 * into it. Restoring only `-designer.go` after those left the code file
+	 * naming a control or a method the designer file no longer had, and the
+	 * project stopped compiling on Ctrl+Z.
 	 */
-	private undoStack: string[] = [];
-	private redoStack: string[] = [];
+	private undoStack: FormSnapshot[] = [];
+	private redoStack: FormSnapshot[] = [];
 	private static readonly maxHistory = 100;
 
 	private pushUndo(filePath: string): void {
-		try {
-			this.undoStack.push(fs.readFileSync(filePath, 'utf8'));
-			if (this.undoStack.length > DesignerDocumentSession.maxHistory) {
-				this.undoStack.shift();
+		this.undoStack.push(snapshotForm(filePath));
+		if (this.undoStack.length > DesignerDocumentSession.maxHistory) {
+			this.undoStack.shift();
+		}
+		// Any new edit invalidates the redo branch, as in every editor.
+		this.redoStack.length = 0;
+	}
+
+	/**
+	 * Saves whichever of the form's files an editor holds unsaved changes
+	 * for, before the tool writes them on disk. Without it the tool wrote
+	 * under an editor that still had the old text, and the user was left
+	 * choosing between their unsaved edits and the designer's change - or,
+	 * having typed into MainForm.go and then renamed a control, losing one of
+	 * the two without being asked.
+	 */
+	private async saveFormFiles(filePath: string): Promise<void> {
+		const files = new Set(formFiles(filePath).map((f) => path.resolve(f)));
+		for (const doc of vscode.workspace.textDocuments) {
+			if (doc.isDirty && doc.uri.scheme === 'file' && files.has(path.resolve(doc.uri.fsPath))) {
+				await doc.save();
 			}
-			// Any new edit invalidates the redo branch, as in every editor.
-			this.redoStack.length = 0;
-		} catch {
-			// A file that cannot be read will fail the apply that follows,
-			// with a message naming the real problem. Reporting the missing
-			// history entry here would only bury it.
 		}
 	}
 
-	/** Moves one step between two history stacks, restoring the file. */
+	/** Moves one step between two history stacks, restoring the files. */
 	private async stepHistory(
 		filePath: string,
-		from: string[],
-		to: string[],
+		from: FormSnapshot[],
+		to: FormSnapshot[],
 		emptyMessage: string
 	): Promise<void> {
 		const snapshot = from.pop();
@@ -202,8 +221,9 @@ class DesignerDocumentSession {
 			return;
 		}
 		try {
-			to.push(fs.readFileSync(filePath, 'utf8'));
-			fs.writeFileSync(filePath, snapshot, 'utf8');
+			await this.saveFormFiles(filePath);
+			to.push(snapshotForm(filePath, snapshot));
+			restoreForm(snapshot);
 			const model = await this.tool.parse(filePath);
 			this.lastModel = model;
 			this.noteWritten(filePath);
@@ -246,6 +266,8 @@ class DesignerDocumentSession {
 			return;
 		}
 		const { receiverType, recvVar } = this.lastModel;
+		await this.saveFormFiles(filePath);
+		this.pushUndo(filePath);
 		try {
 			const result = await this.tool.ensureHandler(filePath, receiverType, recvVar, message.handler, message.paramType);
 			const model = await this.tool.apply(filePath, [
@@ -255,7 +277,75 @@ class DesignerDocumentSession {
 			this.noteWritten(filePath);
 			this.post({ type: 'handlerWired', result, model });
 		} catch (err) {
+			this.undoStack.pop();
 			this.post({ type: 'error', message: describeError(err) });
+		}
+	}
+}
+
+/**
+ * One undo step: the content of every file of the form as it was, with
+ * `null` for a file that did not exist yet (the code file an event's first
+ * stub created).
+ */
+type FormSnapshot = Map<string, string | null>;
+
+/**
+ * The files one designer edit can write: the designer file itself and the
+ * hand-written Go files beside it - its paired `Foo.go`, or whichever file
+ * ensure-handler falls back to (see tool/ensurehandler.go). Test files are
+ * left out; nothing the tool does touches them.
+ */
+export function formFiles(designerPath: string): string[] {
+	const dir = path.dirname(designerPath);
+	const out = [designerPath];
+	let names: string[] = [];
+	try {
+		names = fs.readdirSync(dir);
+	} catch {
+		return out;
+	}
+	for (const name of names.sort()) {
+		if (!name.endsWith('.go') || name.endsWith('-designer.go') || name.endsWith('_test.go')) continue;
+		out.push(path.join(dir, name));
+	}
+	// The paired file may not exist yet; it is still one the next edit can
+	// create, and undoing that edit has to know it was absent.
+	const paired = designerPath.replace(/-designer\.go$/, '.go');
+	if (!out.includes(paired)) out.push(paired);
+	return out;
+}
+
+/** Reads the form's files. `also` adds the paths a snapshot being undone
+ * named, so a file created since is recorded as present and restored. */
+export function snapshotForm(designerPath: string, also?: FormSnapshot): FormSnapshot {
+	const snap: FormSnapshot = new Map();
+	const paths = new Set(formFiles(designerPath));
+	if (also) for (const p of also.keys()) paths.add(p);
+	for (const p of paths) {
+		try {
+			snap.set(p, fs.readFileSync(p, 'utf8'));
+		} catch {
+			snap.set(p, null);
+		}
+	}
+	return snap;
+}
+
+/** Puts every file of a snapshot back, touching only those that differ. */
+export function restoreForm(snap: FormSnapshot): void {
+	for (const [p, content] of snap) {
+		let current: string | null = null;
+		try {
+			current = fs.readFileSync(p, 'utf8');
+		} catch {
+			current = null;
+		}
+		if (current === content) continue;
+		if (content === null) {
+			fs.rmSync(p, { force: true });
+		} else {
+			fs.writeFileSync(p, content, 'utf8');
 		}
 	}
 }

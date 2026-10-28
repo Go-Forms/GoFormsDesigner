@@ -85,6 +85,10 @@ type ControlDesc struct {
 	// what makes parse.go recognize the add calls, apply.go regenerate them
 	// and the webview show a list editor - all from this one entry.
 	Collection *CollectionDesc `json:",omitempty"`
+	// Descriptions is set only on the catalog command's output: the help
+	// text for each of the type's properties and events, by name (see
+	// descriptions.go).
+	Descriptions map[string]string `json:",omitempty"`
 	// OwnEventCount is set only on the catalog command's output: how many
 	// of the merged Events list belong to this type rather than being
 	// inherited from ControlBase. The Events panel uses it to draw the
@@ -174,10 +178,14 @@ var formDesc = &ControlDesc{
 	Setters: map[string]string{
 		"SetFixedSize":  "fixedSize",
 		"SetAutoScroll": "autoScroll",
+		"SetBackColor":  "backColor",
+		"SetPadding":    "padding",
 	},
 	Kinds: map[string]string{
 		"fixedSize":  KindBool,
 		"autoScroll": KindBool,
+		"backColor":  KindColor,
+		"padding":    KindPadding,
 	},
 	// CenterOnScreen takes no argument, so it is a bool written as a bare
 	// call - the same shape a Timer's Start() has.
@@ -260,23 +268,42 @@ const (
 	// a comma-separated list of names from Enums; the generated code joins
 	// them with "|".
 	KindFlags = "flags"
+	// KindColor is a goforms.RGB/RGBA call; the wire value is "#rrggbb" or
+	// "#rrggbbaa". KindFont is goforms.NewFont, "family, size[, Bold][,
+	// Italic]". KindPadding is goforms.NewPadding or a goforms.Padding
+	// literal, "all" or "left, top, right, bottom". See styleprops.go.
+	KindColor   = "color"
+	KindFont    = "font"
+	KindPadding = "padding"
 )
 
 // baseProps are the properties every control inherits from ControlBase (see
 // GoForms/control.go). They are merged into each type's own Setters by the
 // catalog command, the same way baseEvents are.
 var baseProps = map[string]string{
-	"SetAnchor":   "anchor",
-	"SetDock":     "dock",
-	"SetTabIndex": "tabIndex",
-	"SetTabStop":  "tabStop",
+	"SetAnchor":    "anchor",
+	"SetDock":      "dock",
+	"SetTabIndex":  "tabIndex",
+	"SetTabStop":   "tabStop",
+	"SetVisible":   "visible",
+	"SetEnabled":   "enabled",
+	"SetForeColor": "foreColor",
+	"SetBackColor": "backColor",
+	"SetFont":      "font",
+	"SetPadding":   "padding",
 }
 
 var basePropKinds = map[string]string{
-	"anchor":   KindFlags,
-	"dock":     KindEnum,
-	"tabIndex": KindNumber,
-	"tabStop":  KindBool,
+	"anchor":    KindFlags,
+	"dock":      KindEnum,
+	"tabIndex":  KindNumber,
+	"tabStop":   KindBool,
+	"visible":   KindBool,
+	"enabled":   KindBool,
+	"foreColor": KindColor,
+	"backColor": KindColor,
+	"font":      KindFont,
+	"padding":   KindPadding,
 }
 
 var basePropEnums = map[string][]string{
@@ -414,11 +441,13 @@ var catalog = map[string]*ControlDesc{
 	"CheckBox": {
 		Type: "CheckBox", Ctors: []string{"NewCheckBox"}, DefaultW: 160, DefaultH: 24,
 		Setters: map[string]string{"SetText": "text", "SetChecked": "checked"},
+		Kinds:   map[string]string{"checked": KindBool},
 		Events:  []string{"CheckedChanged"},
 	},
 	"RadioButton": {
 		Type: "RadioButton", Ctors: []string{"NewRadioButton"}, DefaultW: 90, DefaultH: 24,
 		Setters: map[string]string{"SetText": "text", "SetChecked": "checked"},
+		Kinds:   map[string]string{"checked": KindBool},
 		Events:  []string{"CheckedChanged"},
 	},
 	"ComboBox": {

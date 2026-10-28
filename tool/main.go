@@ -13,6 +13,7 @@
 //	goformsdesigner tidy <designer.go>
 //	goformsdesigner theme-parse <name-styles.go>
 //	goformsdesigner theme-apply <name-styles.go>   (ops JSON array on stdin)
+//	goformsdesigner set-startup <main.go> <designer.go>
 //	goformsdesigner catalog
 //	goformsdesigner categories
 package main
@@ -25,7 +26,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		stderrf("usage: goformsdesigner parse|apply|tidy|theme-parse|theme-apply|ensure-handler|catalog|categories ...")
+		stderrf("usage: goformsdesigner parse|apply|tidy|theme-parse|theme-apply|ensure-handler|set-startup|catalog|categories ...")
 		os.Exit(2)
 	}
 
@@ -43,6 +44,8 @@ func main() {
 		err = cmdThemeApply(os.Args[2:])
 	case "ensure-handler":
 		err = cmdEnsureHandler(os.Args[2:])
+	case "set-startup":
+		err = cmdSetStartup(os.Args[2:])
 	case "catalog":
 		err = cmdCatalog()
 	case "categories":
@@ -119,6 +122,19 @@ func cmdEnsureHandler(args []string) error {
 		paramType = args[4]
 	}
 	res, err := ensureHandler(args[0], args[1], args[2], args[3], paramType)
+	if err != nil {
+		return err
+	}
+	return printJSON(res)
+}
+
+// cmdSetStartup points main.go's goforms.Run at a form ("Set as Startup
+// Form").
+func cmdSetStartup(args []string) error {
+	if len(args) != 2 {
+		return errUsage("set-startup <main.go> <designer.go>")
+	}
+	res, err := setStartup(args[0], args[1])
 	if err != nil {
 		return err
 	}
@@ -202,6 +218,7 @@ func cmdCatalog() error {
 				merged.EventArgs[ev] = t
 			}
 		}
+		merged.Descriptions = descriptionsFor(name, propNames(&merged), merged.Events)
 		out[name] = &merged
 	}
 
@@ -219,6 +236,7 @@ func cmdCatalog() error {
 			form.EventArgs[ev] = t
 		}
 	}
+	form.Descriptions = descriptionsFor("Form", propNames(&form), form.Events)
 	out["Form"] = &form
 
 	return printJSON(out)
@@ -241,3 +259,19 @@ type usageError string
 func (e usageError) Error() string { return "usage: goformsdesigner " + string(e) }
 
 func errUsage(s string) error { return usageError(s) }
+
+// propNames lists every property a type can write, whichever way it writes
+// it - the same set the property panel shows.
+func propNames(desc *ControlDesc) []string {
+	var out []string
+	for _, p := range desc.Setters {
+		out = append(out, p)
+	}
+	for _, p := range desc.Fields {
+		out = append(out, p)
+	}
+	for p := range desc.Calls {
+		out = append(out, p)
+	}
+	return append(out, desc.CtorProps...)
+}

@@ -171,11 +171,12 @@ func stmtKey(r *parseResult, stmt ast.Stmt) (key string, ok bool) {
 
 	// Adding one control to a container, in any of the shapes that do it:
 	// mf.AddControl(mf.btn), mf.panel.AddControl(mf.btn),
-	// mf.split.Panel1().AddControl(mf.btn), mf.tabs.TabPages()[0].AddControl(mf.btn).
+	// mf.split.Panel1().AddControl(mf.btn), mf.tabs.TabPages()[0].AddControl(mf.btn),
+	// mf.table.AddControlAt(mf.btn, 1, 0).
 	// The control ends up under whichever container claimed it last, so an
 	// earlier add is not a second parent - it is a stale one.
-	if sel, isSel := call.Fun.(*ast.SelectorExpr); isSel && sel.Sel.Name == "AddControl" && len(call.Args) == 1 {
-		if argParts, isChain := selChain(call.Args[0]); isChain && len(argParts) == 2 && argParts[0] == recv {
+	if child, _, isAdd := addedChild(call); isAdd {
+		if argParts, isChain := selChain(child); isChain && len(argParts) == 2 && argParts[0] == recv {
 			if _, known := r.controls[argParts[1]]; known {
 				return "add:" + argParts[1], true
 			}

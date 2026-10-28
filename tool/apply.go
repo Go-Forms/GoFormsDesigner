@@ -161,6 +161,14 @@ func planOp(r *parseResult, op Op) ([]edit, error) {
 		return planSetForm(r, op)
 	case "rename":
 		return planRename(r, op)
+	case "reorder":
+		return planReorderOp(r, op)
+	case "resetProp":
+		return one(planResetProp(r, op))
+	case "setCell":
+		return one(planSetCell(r, op))
+	case "setTable":
+		return planSetTable(r, op)
 	default:
 		return nil, fmt.Errorf("unknown op %q", op.Op)
 	}
@@ -591,6 +599,46 @@ func planCallProp(r *parseResult, pc *pcontrol, op Op, method string) (*edit, er
 	return &edit{insertAt, insertAt, stmt}, nil
 }
 
+// planResetProp puts a property back to its default by deleting the
+// statement that sets it - which is what "default" means in a designer file:
+// a property nobody set. It is the ↺ beside a modified property, as in the
+// Visual Studio property grid.
+//
+// A property carried by the constructor has no statement of its own to
+// delete; the constructor needs some value there, so it is refused rather
+// than rewritten to a guess.
+func planResetProp(r *parseResult, op Op) (*edit, error) {
+	var rng ByteRangeTok
+	var found bool
+	if op.ID == "" {
+		if rng, found = r.form.callStmts[op.Prop]; !found {
+			rng, found = r.form.setterStmts[op.Prop]
+		}
+		if !found {
+			return nil, nil // already at its default
+		}
+	} else {
+		pc, err := mustControl(r, op.ID)
+		if err != nil {
+			return nil, err
+		}
+		desc := catalog[pc.spec.Type]
+		if isCtorProp(desc, op.Prop) {
+			return nil, fmt.Errorf("%s's %s is a constructor argument, so it has no default to go back to - set a value instead", op.ID, op.Prop)
+		}
+		for _, stmts := range []map[string]ByteRangeTok{pc.callStmts, pc.fieldStmts, pc.setterStmts} {
+			if rng, found = stmts[op.Prop]; found {
+				break
+			}
+		}
+		if !found {
+			return nil, nil
+		}
+	}
+	start, end := wholeLines(r.src, offset(r.fset, rng.Start), offset(r.fset, rng.End))
+	return &edit{start, end, ""}, nil
+}
+
 // formatPropValue renders a property value as the Go expression its setter
 // expects, per the prop's declared kind.
 func formatPropValue(desc *ControlDesc, prop, value string) (string, error) {
@@ -639,6 +687,12 @@ func formatPropValue(desc *ControlDesc, prop, value string) (string, error) {
 			parts = append(parts, "goforms."+name)
 		}
 		return strings.Join(parts, " | "), nil
+	case KindColor:
+		return formatColor(prop, value)
+	case KindFont:
+		return formatFont(prop, value)
+	case KindPadding:
+		return formatPadding(prop, value)
 	default:
 		// A bare true/false stays an identifier even when the prop wasn't
 		// declared in Kinds, matching how parse.go reads it back.
@@ -737,11 +791,39 @@ func planAdd(r *parseResult, op Op) ([]edit, error) {
 		return nil, err
 	}
 
+	if parentTypeOf(r, op.Parent) == "TableLayoutPanel" {
+		if err := checkCell(r, op.Parent, op.Cell); err != nil {
+			return nil, err
+		}
+	}
+
 	spec := &ControlSpec{
 		ID: op.ID, Type: op.Type, Parent: op.Parent, ParentSlot: op.ParentSlot,
 		X: op.X, Y: op.Y, W: op.W, H: op.H, Text: op.Text,
-		Collection: op.Collection,
-		Props:      map[string]string{}, Events: map[string]string{},
+		Items: op.Items, Collection: op.Collection, Columns: op.Columns,
+		Cell: op.Cell, TableColumns: op.TableColumns, TableRows: op.TableRows,
+		Props: map[string]string{}, Events: map[string]string{},
+	}
+	// A paste arrives with the copied control's properties and events. They
+	// are checked here rather than trusted: codegen writes what it is given,
+	// and a handler name that is not an identifier, or an event the type
+	// does not raise, would be a file that no longer compiles.
+	for p, v := range op.Props {
+		spec.Props[p] = v
+	}
+	for ev, h := range op.Events {
+		if _, ok := eventArgType(catalog[op.Type], ev); !ok {
+			return nil, fmt.Errorf("control type %q has no %q event", op.Type, ev)
+		}
+		if err := validateGoIdent(h); err != nil {
+			return nil, fmt.Errorf("handler for %s: %w", ev, err)
+		}
+		spec.Events[ev] = h
+	}
+	for _, t := range append(append([]TrackSpec{}, op.TableColumns...), op.TableRows...) {
+		if err := validTrack(t); err != nil {
+			return nil, err
+		}
 	}
 	// A tab control with no tabs (or a tree with no nodes) renders as an
 	// empty box, which reads as a broken drop rather than a new control - so
@@ -872,7 +954,7 @@ func planSetParent(r *parseResult, op Op) (*edit, error) {
 		}
 		ancestor = next.spec.Parent
 	}
-	if pc.spec.Parent == op.Parent && pc.spec.ParentSlot == op.ParentSlot {
+	if pc.spec.Parent == op.Parent && pc.spec.ParentSlot == op.ParentSlot && sameCell(pc.spec.Cell, op.Cell) {
 		return nil, nil // already there
 	}
 	if pc.addCtlRange.Start == token.NoPos {
@@ -881,7 +963,12 @@ func planSetParent(r *parseResult, op Op) (*edit, error) {
 
 	start := offset(r.fset, pc.addCtlRange.Start)
 	end := offset(r.fset, pc.addCtlRange.End)
-	line := addControlLine(r.model.RecvVar, op.ID, op.Parent, parentTypeOf(r, op.Parent), op.ParentSlot, "")
+	if parentTypeOf(r, op.Parent) == "TableLayoutPanel" {
+		if err := checkCell(r, op.Parent, op.Cell); err != nil {
+			return nil, err
+		}
+	}
+	line := addControlLine(r.model.RecvVar, op.ID, op.Parent, parentTypeOf(r, op.Parent), op.ParentSlot, op.Cell, "")
 	// The recorded range is the statement, not the whole line, so replace it
 	// without its trailing newline.
 	return &edit{start, end, strings.TrimSuffix(line, "\n")}, nil

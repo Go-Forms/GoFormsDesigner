@@ -49,6 +49,27 @@ type GridColumnSpec struct {
 	ButtonText string `json:"buttonText,omitempty"`
 }
 
+// CellSpec is where a control sits in a TableLayoutPanel: its column and
+// row, and how many of each it spans. It is read from the
+// AddControlAt/AddControlSpanning call that parents it; a control added with
+// a plain AddControl has no CellSpec and takes the next free cell, the way
+// the framework (and WinForms) places it.
+type CellSpec struct {
+	Column     int `json:"column"`
+	Row        int `json:"row"`
+	ColumnSpan int `json:"columnSpan,omitempty"`
+	RowSpan    int `json:"rowSpan,omitempty"`
+}
+
+// TrackSpec is one column or row of a TableLayoutPanel: how it is sized.
+// Type is "Absolute", "Percent" or "AutoSize" - the goforms constructor it
+// is written with - and Value is pixels or a percentage (ignored for
+// AutoSize).
+type TrackSpec struct {
+	Type  string  `json:"type"`
+	Value float64 `json:"value,omitempty"`
+}
+
 // ControlSpec is one recognized control instance.
 type ControlSpec struct {
 	ID     string `json:"id"`     // Go field name, e.g. "btnGreet"
@@ -96,6 +117,19 @@ type ControlSpec struct {
 	// Group is the RadioButtonGroup field name this RadioButton belongs to,
 	// if any.
 	Group string `json:"group,omitempty"`
+	// Cell is this control's place in the TableLayoutPanel it is in, when
+	// the file names one (AddControlAt/AddControlSpanning).
+	Cell *CellSpec `json:"cell,omitempty"`
+	// TableColumns and TableRows are a TableLayoutPanel's tracks: their
+	// number is the constructor's column and row count, and each one's
+	// style comes from a SetColumnStyle/SetRowStyle call (AutoSize when
+	// there is none). Rewritten together by the "setTable" op.
+	TableColumns []TrackSpec `json:"tableColumns,omitempty"`
+	TableRows    []TrackSpec `json:"tableRows,omitempty"`
+	// TableReadOnly is set when a track style is written in a way this tool
+	// can't regenerate, so the designer shows the table but refuses to
+	// restyle it - the same rule CollectionReadOnly follows.
+	TableReadOnly bool `json:"tableReadOnly,omitempty"`
 
 	// Supported is false when Type isn't in catalog - the control is still
 	// reported (so the canvas can show a placeholder box and the file isn't
@@ -152,7 +186,7 @@ type FormModel struct {
 
 // Op is one mutation requested by the extension via `apply`.
 type Op struct {
-	Op string `json:"op"` // "setBounds" | "setText" | "setItems" | "setCollection" | "setColumns" | "setProp" | "setEvent" | "add" | "remove" | "setParent" | "setForm" | "rename"
+	Op string `json:"op"` // "setBounds" | "setText" | "setItems" | "setCollection" | "setColumns" | "setProp" | "resetProp" | "setEvent" | "add" | "remove" | "setParent" | "setForm" | "rename" | "reorder" | "setCell" | "setTable"
 	// ID is unused (leave empty) for "setForm", which resizes the Form
 	// itself (W/H) rather than a specific control.
 	ID     string `json:"id"`
@@ -180,4 +214,22 @@ type Op struct {
 	Value   string `json:"value,omitempty"`
 	Event   string `json:"event,omitempty"`
 	Handler string `json:"handler,omitempty"`
+
+	// Props and Events let "add" create a control already configured - the
+	// shape a paste or a duplicate needs, where the new control is a copy of
+	// one the designer has the whole model of. Items and Columns are honoured
+	// by "add" for the same reason.
+	Props  map[string]string `json:"props,omitempty"`
+	Events map[string]string `json:"events,omitempty"`
+	// Cell places a control in a TableLayoutPanel, for "add", "setParent"
+	// and "setCell". Nil on "setCell" goes back to a plain AddControl.
+	Cell *CellSpec `json:"cell,omitempty"`
+	// Order is for "reorder": the IDs of every child of one container (the
+	// op's ID and ParentSlot, "" for the Form) back to front - the order
+	// their AddControl calls run in, which is both the z-order (the last one
+	// added is drawn on top) and the docking order.
+	Order []string `json:"order,omitempty"`
+	// TableColumns/TableRows are the complete new track lists for "setTable".
+	TableColumns []TrackSpec `json:"tableColumns,omitempty"`
+	TableRows    []TrackSpec `json:"tableRows,omitempty"`
 }
