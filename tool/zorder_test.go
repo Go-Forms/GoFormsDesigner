@@ -133,3 +133,17 @@ func TestReorderWorksBesideBlocksThatCannotMove(t *testing.T) {
 		t.Fatalf("form children = %s", got)
 	}
 }
+
+// Deleting the last control that needs an import takes the import with it:
+// a Go file with an unused import does not compile.
+func TestRemovingTheLastDatePickerDropsTheTimeImport(t *testing.T) {
+	path := writeFixture(t, designerFixture)
+	_, src := mustApply(t, path, Op{Op: "add", ID: "dtp", Type: "DateTimePicker", W: 120, H: 30})
+	if !strings.Contains(src, `"time"`) {
+		t.Fatalf("adding a date picker did not import time:\n%s", src)
+	}
+	_, src = mustApply(t, path, Op{Op: "remove", ID: "dtp"})
+	if strings.Contains(src, `"time"`) {
+		t.Errorf("the unused import survived:\n%s", src)
+	}
+}

@@ -16,6 +16,8 @@ whenever a file here is newer (see `src/goTool.ts`).
     go run . apply   MainForm-designer.go       # ops JSON array on stdin
     go run . tidy    MainForm-designer.go       # drop redundant statements
     go run . ensure-handler MainForm-designer.go MainForm mf btn_Click MouseEventArgs
+    go run . set-startup main.go Forms/SettingsForm/SettingsForm-designer.go
+    go run . project-controls Forms/MainForm    # the project's own controls
     go run . catalog                            # every control type
     go run . categories                         # toolbox groups, in order
 

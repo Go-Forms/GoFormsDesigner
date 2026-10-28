@@ -15,16 +15,31 @@ meant to open.
 **Edits forms visually.** Open any `*-designer.go` file and it becomes a
 canvas with a toolbox of 34 controls, each drawn to approximate its real
 on-screen look rather than as a labelled box. Drag to move, drag the edges to
-resize, Ctrl or Shift click to select several and move them together. Edges
-snap to their neighbours' left, right and centre with a guide line drawn
-where they line up.
+resize, Ctrl or Shift click to select several, or drag a rectangle round
+them, and move them together. Edges snap to their neighbours' edges and
+centres and to the container's sides, with a guide line drawn where they line
+up; hold Alt to drag freely. The arrow keys nudge, Ctrl+C, Ctrl+X, Ctrl+V and
+Ctrl+D copy, cut, paste and duplicate - with everything inside, into another
+form too - and a right-click opens the Visual Studio context menu: View Code,
+the clipboard, Bring to Front and Send to Back, select the parent.
+
+**Lays panels out the way they run.** A FlowLayoutPanel's controls are drawn
+one after another where the flow puts them, and dropping one marks the place
+it goes in the order. A TableLayoutPanel shows its cells: a control dropped
+on it goes to the cell under the mouse (swapping with the one there), the
+boundaries between columns and rows drag to resize them, and its columns and
+rows - Absolute, Percent or AutoSize - are edited, inserted and deleted from
+the property panel or the right-click menu. A SplitContainer's splitter drags
+to set SplitterDistance.
 
 **Keeps your code separate from the generated code.** A form is split the way
 a WinForms form is split into Form1.cs and Form1.Designer.cs: layout in
 MainForm-designer.go, your handlers in MainForm.go. The designer only ever
 writes the first, so it cannot eat what you wrote.
 
-**Writes event handlers for you.** Every control lists its own events first,
+**Writes event handlers for you.** Double-click a control and its default
+event - Click, TextChanged, CheckedChanged, the form's Load - is wired and
+its handler opened, as in Visual Studio. Every control lists its own events first,
 then the ones inherited from Control — Click, MouseDown, KeyPress, GotFocus
 and the rest. Wiring one generates a fully typed handler stub in your file
 and adds the import it needs, respecting the alias if you import the package
@@ -32,9 +47,23 @@ under one. Re-wiring an event rewrites the line that is already there instead
 of leaving two handlers running.
 
 **Edits properties with the right editor per type.** A checkbox for booleans,
-a spinner for numbers, a dropdown for enums, a row of checkboxes for flag
-sets like Anchor. Renaming a control renames its field, every reference to
-it, and any handler still named after it.
+a spinner for numbers, a dropdown for enums, the Visual Studio editors for
+Anchor (a bar to each side) and Dock (the six places), a palette and a picker
+for colours, family, size and style for a font. Every control has Visible,
+Enabled, ForeColor, BackColor, Font and Padding besides its own properties. A
+property the file sets is shown in bold with ↺ beside it to put it back to the
+default, and the box under the panel says what the property under the mouse
+does. The ◂ smart tag on a selected control offers its usual tasks - Dock in
+Parent Container, Add Tab, Add Column, Edit Items. Renaming a control renames
+its field, every reference to it, and any handler still named after it.
+
+**Shows the form as a tree.** The Outline tab lists the controls front-most
+first, containers with what is inside them; drag a control onto a container to
+move it there, or above or below another to change the z-order.
+
+**Lists your own controls.** A type of the project's that embeds a GoForms
+control and has a `NewX()` or `NewX(w, h)` constructor is in the toolbox, at
+the top. It is found by reading the module's source, so none of it runs.
 
 **Tidies up after itself.** Every edit ends with a cleanup pass that removes
 what the edit made redundant: setters a later call already overrides, stacked
@@ -45,7 +74,9 @@ recognise is left exactly as you wrote it.
 **Has undo of its own.** Ctrl+Z and Ctrl+Y inside the designer, with a
 snapshot history the extension keeps itself — the file is written directly
 rather than through the editor's document, so the editor's undo never sees
-these changes.
+these changes. A step covers the whole form, so undoing a rename puts back
+the hand-written half too, and a code file with unsaved changes is saved before
+the designer writes to it.
 
 **Themes.** A project's `<name>-styles.go` opens as a visual theme editor: a
 picker and a hex box per colour, numbers for the metrics, and a live preview
@@ -55,7 +86,9 @@ showing them together. A field left out keeps the framework default, and that
 **Scaffolds projects and forms.** Create a new project — empty, a worked
 example, one aimed at the browser, or one aimed at Android — and get a
 correct go.mod, a main.go, a first form, build tasks and a .gitignore. Add a
-form to any folder from the Explorer's right-click menu.
+form to any folder from the Explorer's right-click menu: an empty one, a
+dialog, an About box, a login form or a splash screen. **Set as Startup Form**
+points `goforms.Run` at it.
 
 **Builds and runs the project.** One command each for the desktop, the
 browser and Android, plus a local server that opens a WebAssembly build in
@@ -159,9 +192,17 @@ produces an empty form.
 
 ## Things worth knowing
 
-- **Escape selects the form.** A form covered edge to edge by a docked control
-  has no background left to click, so Escape is the way back to its own
-  properties — title, width, height.
+- **Escape goes up a level** — to the container of the selection, then to the
+  form. A form covered edge to edge by a docked control has no background left
+  to click, so Escape is the way back to its own properties — title, width,
+  height.
+- **A selected container moves by its ✥ glyph.** A drag inside it draws a
+  selection rectangle among its controls instead, as in Visual Studio.
+- **The arrow keys** move the selection by a pixel (Ctrl: eight) and Shift
+  resizes it; in a table they move a control from cell to cell, in a flow
+  back and forth in the order.
+- **A paste keeps its handlers only in the form it was copied from.** In
+  another form those methods do not exist, so the copy arrives unwired.
 - **Three modes sit above the canvas.** **Zoom** draws the form at 50–200%, or
   fits it to the window; it changes nothing about the form. **Lock** still
   lets you select and inspect but refuses every drag and resize. **Tab order**
@@ -173,14 +214,21 @@ produces an empty form.
 - **Ctrl or Shift click extends the selection.** Dragging any member then moves
   the whole group, and edges snap to their neighbours with a guide line drawn
   where they line up. With more than one selected, the panel offers the
-  WinForms Format commands — align, centre, same size — all measured against
-  the last control you clicked.
+  WinForms Format commands — align, centre, same size, equal spacing — all
+  measured against the last control you clicked.
 - **Undo is the designer's own.** Ctrl+Z and Ctrl+Y inside the canvas. The file
   is written directly rather than through the editor's document, so the
   editor's undo never sees these edits and the extension keeps its own history.
 - **Docked controls are drawn where they will really be**, not at their stored
   coordinates, and marked with a dashed outline — dragging one has no effect,
-  which is what the outline is telling you.
+  which is what the outline is telling you. The same goes for a control in a
+  flow or a table cell, marked with a dotted one: it is moved by its place in
+  the order or its cell. Bring to Front and Send to Back change the docking
+  order too, as in WinForms.
+- **A hidden or disabled control is still drawn**, faded or greyed, so it can
+  be selected. ForeColor, BackColor and Font show on the controls GoForms
+  applies them to — a Label's text, a Panel's background — and nowhere else,
+  because Fyne's own widgets draw with the theme.
 - **A control the catalogue does not model is left alone.** The cleanup pass
   only touches statements it understands, so hand-written setup inside
   `initializeComponent` survives.
@@ -202,7 +250,9 @@ produces an empty form.
   connection are Go fetching your project's modules the first time, and
   downloading the Android NDK — both are yours to do, once. Turn on
   `goforms.build.offline` to have builds run with `GOPROXY=off`, so a module
-  missing from the cache fails by name instead of hanging.
+  missing from the cache fails by name instead of hanging. **Check for
+  Updates** asks Go, through the module proxy Go already uses, and only when
+  you run it — or once a day with `goforms.checkForUpdates`, which is off.
 
 ## Requirements
 

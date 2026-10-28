@@ -1,5 +1,113 @@
 # Changelog
 
+## 0.13.0
+
+What the NetForms designer learned, brought back to GoForms.
+
+The two designers grew from the same webview, and the .NET one has since
+gone further: a canvas that knows what a table and a flow do with their
+controls, a clipboard, the Visual Studio context menu, smart tags, a document
+outline, the visual property editors. Most of it carries over unchanged in
+spirit - the Go tool does the writing, as it always has - and this release
+carries it over.
+
+### On the canvas
+
+- **Copy, cut, paste and duplicate** (Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D).
+  A copy carries everything inside the copied controls - a panel's children,
+  a table's cells, a grid's columns, a toolbar's buttons - and pastes into
+  another form too. A pasted control keeps its name when it is free, cascades
+  down and right instead of landing exactly on what is there, and keeps its
+  event handlers only in the form it came from, where those methods exist.
+- **A right-click menu**, as Visual Studio's: View Code, the clipboard,
+  Bring to Front and Send to Back, select the container, Lock, Tab Order, Set
+  as Startup Form; on a table, inserting and deleting its columns and rows
+  where the mouse is.
+- **A selection rectangle** on the form, or inside a selected container -
+  which then moves by its ✥ glyph. Ctrl+A selects the container's controls.
+- **The arrow keys** nudge the selection (Ctrl: by eight), Shift resizes it.
+  **Escape** goes up to the container, then the form.
+- **Double-click** wires a control's default event - Click, TextChanged,
+  CheckedChanged, a timer's Tick, the form's Load - and opens the handler, or
+  opens the one already wired.
+- **Snapping** to the neighbours' edges and centres and the container's
+  padded sides, for a resize as well as a move; Alt drags freely. Format
+  gains Middle, Same size, and equal spacing across and down.
+- **Bring to Front / Send to Back** reorder the AddControl calls, which is
+  what z-order is here - the child added last is drawn on top - and, as in
+  WinForms, the docking order too.
+
+### Panels laid out the way they run
+
+- A **FlowLayoutPanel**'s controls are drawn where the flow puts them, not
+  at their own coordinates; a drop marks where in the order it goes, and the
+  arrow keys move a control back and forth.
+- A **TableLayoutPanel** is laid out by cells. The designer reads
+  `AddControlAt`/`AddControlSpanning` and `SetColumnStyle`/`SetRowStyle` -
+  before, a control added to a cell vanished from the model altogether - and
+  writes them: a drop goes to the cell under the mouse, swapping with the
+  control there; the boundaries between tracks drag to resize them; a
+  **Columns and rows** group edits each one's Absolute, Percent or AutoSize
+  size and inserts, deletes and reorders them, the controls going along; a
+  control in a table has a **Cell** group with its column, row and spans.
+- A **SplitContainer**'s splitter drags to set SplitterDistance.
+- Both panels are ports of the framework's own layout, checked against the
+  fixture GoForms' new `TestGoldenPanelLayout` writes.
+
+### In the property panel
+
+- **Visible, Enabled, ForeColor, BackColor, Font and Padding** on every
+  control, and BackColor and Padding on the form - the framework has had them
+  all along. A hidden control is drawn faded, a disabled one greyed; colours
+  and fonts show on the controls GoForms applies them to.
+- **Visual editors**: Anchor as a bar to each side, Dock as its six places,
+  a colour palette with a picker and the hex value, a font's family, size and
+  style together.
+- A property the file sets is **bold, with ↺** to reset it - which deletes the
+  line that sets it.
+- The box under the panel says **what the property or event** under the mouse
+  does, for every one of them.
+- The type's own properties and the ones every control has are in separate
+  groups, and a rebuild of the panel keeps the field you were typing in.
+- **Smart tags**: the ◂ on a selected control opens its tasks - Dock in
+  Parent Container, Add or Remove Tab, Add and Edit Columns, Edit Items, a
+  table's Add Column and Add Row, a flow's direction.
+
+### Elsewhere
+
+- **Outline**: a third tab shows the form as a tree, front-most first, with
+  a split container's halves and a tab control's pages; drag a control onto a
+  container to move it in, or above and below another to change the z-order.
+- **The project's own controls** are in the toolbox: a type embedding a
+  GoForms control, with a `NewX()` or `NewX(w, h)` constructor, found by
+  reading the module's source. They are written with their import, read back
+  and edited like any control, and drawn as a placeholder.
+- **New Form** offers a dialog, an About box, a login form and a splash
+  screen besides the empty form.
+- **GoForms: Set as Startup Form** points `goforms.Run` in main.go at the
+  form, swapping the imports.
+- **GoForms: Check for Updates** asks Go whether the framework your projects
+  use, or Go itself, has a newer release, and updates what you tick. It runs
+  only when asked, or daily with `goforms.checkForUpdates` (off by default).
+
+### Fixed
+
+- **Undo restored only half a rename.** Renaming a control rewrites the
+  hand-written file as well, but the designer's history only kept the
+  designer file, so Ctrl+Z left MainForm.go using the new name - and the
+  project no longer compiled. A history step now holds every file of the
+  form, and wiring an event is undoable too.
+- **The designer wrote under unsaved changes.** With MainForm.go open and
+  modified, a rename or a new handler stub was written to disk underneath the
+  editor, which then offered to overwrite one with the other. The form's open
+  files are saved first.
+- **An import nothing uses any more is removed**: deleting the last date
+  picker left `"time"` imported, which does not compile.
+- CheckBox's and RadioButton's `checked` is declared a bool.
+
+A test now builds what the tool writes - every control type with every
+property set - against GoForms itself, and CI runs it.
+
 ## 0.12.6
 
 Cyrillic in the browser.

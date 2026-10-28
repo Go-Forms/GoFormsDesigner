@@ -34,6 +34,31 @@ The two sides drift silently when they drift at all - a column ends up a few
 pixels off in the canvas and nowhere else - so the fixture is the only thing
 that reports it.
 
+Docking and the two layout panels are ported the same way: `media/dockLayout.js`
+against `test/dock-golden.json` (`TestGoldenDockLayout`), and
+`media/panelLayout.js` - a FlowLayoutPanel's flow, a TableLayoutPanel's tracks
+and cells - against `test/panels-golden.json` (`TestGoldenPanelLayout`):
+
+    cd ../GoForms && go test -run 'TestGolden' .
+
+`media/geometry.js` - snapping, the Format commands, the selection rectangle -
+is ported from the NetForms designer and has no framework side; its tests
+check the math directly.
+
+## Building what the tool writes
+
+Every other tool test checks the text the tool writes. One more checks that it
+compiles: `TestGeneratedCodeCompilesAgainstGoForms` adds every control type
+with every property set, a table by cell and a control of the project's own,
+and builds the result against a GoForms checkout;
+`TestFormTemplatesBuildAndOpen` does the same for the New Form templates. Both
+need the checkout, and skip without it:
+
+    cd tool && GOFORMS_DIR=../../GoForms go test ./...
+
+They build for js/wasm, which needs no C compiler and no GL headers. CI checks
+out GoForms and runs them on Linux.
+
 ## Installing
 
 ### Option A: build a `.vsix` and install it (closest to "real" install)
@@ -118,10 +143,12 @@ src/
   scaffold.ts                <- template copying, token substitution, validation
   goTool.ts                  <- the only caller of the bundled Go CLI
   designerEditorProvider.ts  <- the designer's custom editor and its webview host
-media/                       <- webview assets: the canvas and its layout
-                                ports, plus the theme editor
+media/                       <- webview assets: the canvas, its layout
+                                ports (dock, flow and table, the grid), the
+                                canvas geometry, plus the theme editor
 templates/
   empty/                     <- minimal project (go.mod, main.go, MainForm)
+  forms/                     <- New Form's kinds: dialog, about, login, splash
   example/                   <- a fuller project, adapted from GoFormsDemo
 test/                        <- the extension's tests
 testlib/                     <- the DOM shim they run media/*.js against
