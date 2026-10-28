@@ -1,0 +1,781 @@
+[
+  {
+    "name": "flow left to right wraps at the edge",
+    "kind": "flow",
+    "clientW": 250,
+    "clientH": 200,
+    "padding": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "direction": "FlowLeftToRight",
+    "wrap": true,
+    "spacing": 6,
+    "children": [
+      {
+        "name": "a",
+        "w": 100,
+        "h": 30,
+        "out": [
+          0,
+          0,
+          100,
+          30
+        ]
+      },
+      {
+        "name": "b",
+        "w": 100,
+        "h": 40,
+        "out": [
+          106,
+          0,
+          100,
+          40
+        ]
+      },
+      {
+        "name": "c",
+        "w": 100,
+        "h": 30,
+        "out": [
+          0,
+          46,
+          100,
+          30
+        ]
+      },
+      {
+        "name": "d",
+        "w": 60,
+        "h": 20,
+        "out": [
+          106,
+          46,
+          60,
+          20
+        ]
+      }
+    ]
+  },
+  {
+    "name": "flow without wrapping runs past the edge",
+    "kind": "flow",
+    "clientW": 250,
+    "clientH": 200,
+    "padding": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "direction": "FlowLeftToRight",
+    "spacing": 6,
+    "children": [
+      {
+        "name": "a",
+        "w": 100,
+        "h": 30,
+        "out": [
+          0,
+          0,
+          100,
+          30
+        ]
+      },
+      {
+        "name": "b",
+        "w": 100,
+        "h": 30,
+        "out": [
+          106,
+          0,
+          100,
+          30
+        ]
+      },
+      {
+        "name": "c",
+        "w": 100,
+        "h": 30,
+        "out": [
+          212,
+          0,
+          100,
+          30
+        ]
+      }
+    ]
+  },
+  {
+    "name": "flow top down wraps into a new column",
+    "kind": "flow",
+    "clientW": 300,
+    "clientH": 100,
+    "padding": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "direction": "FlowTopDown",
+    "wrap": true,
+    "spacing": 4,
+    "children": [
+      {
+        "name": "a",
+        "w": 80,
+        "h": 40,
+        "out": [
+          0,
+          0,
+          80,
+          40
+        ]
+      },
+      {
+        "name": "b",
+        "w": 90,
+        "h": 40,
+        "out": [
+          0,
+          44,
+          90,
+          40
+        ]
+      },
+      {
+        "name": "c",
+        "w": 70,
+        "h": 40,
+        "out": [
+          94,
+          0,
+          70,
+          40
+        ]
+      }
+    ]
+  },
+  {
+    "name": "flow right to left starts at the right edge",
+    "kind": "flow",
+    "clientW": 300,
+    "clientH": 100,
+    "padding": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "direction": "FlowRightToLeft",
+    "wrap": true,
+    "spacing": 10,
+    "children": [
+      {
+        "name": "a",
+        "w": 80,
+        "h": 30,
+        "out": [
+          220,
+          0,
+          80,
+          30
+        ]
+      },
+      {
+        "name": "b",
+        "w": 80,
+        "h": 30,
+        "out": [
+          130,
+          0,
+          80,
+          30
+        ]
+      },
+      {
+        "name": "c",
+        "w": 80,
+        "h": 30,
+        "out": [
+          40,
+          0,
+          80,
+          30
+        ]
+      },
+      {
+        "name": "d",
+        "w": 80,
+        "h": 30,
+        "out": [
+          220,
+          40,
+          80,
+          30
+        ]
+      }
+    ]
+  },
+  {
+    "name": "flow bottom up starts at the bottom",
+    "kind": "flow",
+    "clientW": 200,
+    "clientH": 120,
+    "padding": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "direction": "FlowBottomUp",
+    "wrap": true,
+    "children": [
+      {
+        "name": "a",
+        "w": 50,
+        "h": 50,
+        "out": [
+          0,
+          70,
+          50,
+          50
+        ]
+      },
+      {
+        "name": "b",
+        "w": 50,
+        "h": 50,
+        "out": [
+          0,
+          20,
+          50,
+          50
+        ]
+      },
+      {
+        "name": "c",
+        "w": 50,
+        "h": 50,
+        "out": [
+          50,
+          70,
+          50,
+          50
+        ]
+      }
+    ]
+  },
+  {
+    "name": "flow padding insets the start",
+    "kind": "flow",
+    "clientW": 200,
+    "clientH": 100,
+    "padding": [
+      10,
+      8,
+      6,
+      4
+    ],
+    "direction": "FlowLeftToRight",
+    "wrap": true,
+    "spacing": 5,
+    "children": [
+      {
+        "name": "a",
+        "w": 90,
+        "h": 30,
+        "out": [
+          10,
+          8,
+          90,
+          30
+        ]
+      },
+      {
+        "name": "b",
+        "w": 90,
+        "h": 30,
+        "out": [
+          10,
+          43,
+          90,
+          30
+        ]
+      }
+    ]
+  },
+  {
+    "name": "table auto tracks share the space evenly",
+    "kind": "table",
+    "clientW": 300,
+    "clientH": 200,
+    "padding": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "columns": [
+      {
+        "type": "AutoSize"
+      },
+      {
+        "type": "AutoSize"
+      }
+    ],
+    "rows": [
+      {
+        "type": "AutoSize"
+      },
+      {
+        "type": "AutoSize"
+      }
+    ],
+    "children": [
+      {
+        "name": "a",
+        "w": 10,
+        "h": 10,
+        "out": [
+          0,
+          0,
+          150,
+          100
+        ]
+      },
+      {
+        "name": "b",
+        "w": 10,
+        "h": 10,
+        "out": [
+          150,
+          0,
+          150,
+          100
+        ]
+      },
+      {
+        "name": "c",
+        "w": 10,
+        "h": 10,
+        "out": [
+          0,
+          100,
+          150,
+          100
+        ]
+      }
+    ]
+  },
+  {
+    "name": "table absolute then percent then auto",
+    "kind": "table",
+    "clientW": 400,
+    "clientH": 300,
+    "padding": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "columns": [
+      {
+        "type": "Absolute",
+        "value": 100
+      },
+      {
+        "type": "Percent",
+        "value": 25
+      },
+      {
+        "type": "AutoSize"
+      }
+    ],
+    "rows": [
+      {
+        "type": "Absolute",
+        "value": 40
+      },
+      {
+        "type": "Percent",
+        "value": 100
+      }
+    ],
+    "children": [
+      {
+        "name": "a",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "out": [
+          0,
+          0,
+          100,
+          40
+        ]
+      },
+      {
+        "name": "b",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          1,
+          0,
+          1,
+          1
+        ],
+        "out": [
+          100,
+          0,
+          75,
+          40
+        ]
+      },
+      {
+        "name": "c",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          2,
+          1,
+          1,
+          1
+        ],
+        "out": [
+          175,
+          40,
+          225,
+          260
+        ]
+      }
+    ]
+  },
+  {
+    "name": "table spans cover their tracks",
+    "kind": "table",
+    "clientW": 300,
+    "clientH": 300,
+    "padding": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "columns": [
+      {
+        "type": "AutoSize"
+      },
+      {
+        "type": "AutoSize"
+      },
+      {
+        "type": "AutoSize"
+      }
+    ],
+    "rows": [
+      {
+        "type": "AutoSize"
+      },
+      {
+        "type": "AutoSize"
+      },
+      {
+        "type": "AutoSize"
+      }
+    ],
+    "children": [
+      {
+        "name": "wide",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          0,
+          0,
+          3,
+          1
+        ],
+        "out": [
+          0,
+          0,
+          300,
+          100
+        ]
+      },
+      {
+        "name": "tall",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          0,
+          1,
+          1,
+          2
+        ],
+        "out": [
+          0,
+          100,
+          100,
+          200
+        ]
+      },
+      {
+        "name": "big",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          1,
+          1,
+          2,
+          2
+        ],
+        "out": [
+          100,
+          100,
+          200,
+          200
+        ]
+      }
+    ]
+  },
+  {
+    "name": "table add after a placed cell continues from it",
+    "kind": "table",
+    "clientW": 300,
+    "clientH": 200,
+    "padding": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "columns": [
+      {
+        "type": "AutoSize"
+      },
+      {
+        "type": "AutoSize"
+      },
+      {
+        "type": "AutoSize"
+      }
+    ],
+    "rows": [
+      {
+        "type": "AutoSize"
+      },
+      {
+        "type": "AutoSize"
+      }
+    ],
+    "children": [
+      {
+        "name": "first",
+        "w": 10,
+        "h": 10,
+        "out": [
+          0,
+          0,
+          100,
+          100
+        ]
+      },
+      {
+        "name": "placed",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "out": [
+          100,
+          100,
+          100,
+          100
+        ]
+      },
+      {
+        "name": "next",
+        "w": 10,
+        "h": 10,
+        "out": [
+          200,
+          100,
+          100,
+          100
+        ]
+      },
+      {
+        "name": "wraps",
+        "w": 10,
+        "h": 10,
+        "out": [
+          0,
+          0,
+          10,
+          10
+        ]
+      }
+    ]
+  },
+  {
+    "name": "table padding and a span past the edge",
+    "kind": "table",
+    "clientW": 300,
+    "clientH": 200,
+    "padding": [
+      10,
+      20,
+      30,
+      40
+    ],
+    "columns": [
+      {
+        "type": "Absolute",
+        "value": 60
+      },
+      {
+        "type": "AutoSize"
+      }
+    ],
+    "rows": [
+      {
+        "type": "AutoSize"
+      },
+      {
+        "type": "AutoSize"
+      }
+    ],
+    "children": [
+      {
+        "name": "a",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          1,
+          0,
+          3,
+          1
+        ],
+        "out": [
+          70,
+          20,
+          200,
+          70
+        ]
+      },
+      {
+        "name": "b",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          0,
+          1,
+          1,
+          1
+        ],
+        "out": [
+          10,
+          90,
+          60,
+          70
+        ]
+      }
+    ]
+  },
+  {
+    "name": "table absolute tracks wider than the client",
+    "kind": "table",
+    "clientW": 150,
+    "clientH": 100,
+    "padding": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "columns": [
+      {
+        "type": "Absolute",
+        "value": 100
+      },
+      {
+        "type": "Absolute",
+        "value": 100
+      },
+      {
+        "type": "Percent",
+        "value": 50
+      }
+    ],
+    "rows": [
+      {
+        "type": "AutoSize"
+      }
+    ],
+    "children": [
+      {
+        "name": "a",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "out": [
+          0,
+          0,
+          100,
+          100
+        ]
+      },
+      {
+        "name": "b",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          1,
+          0,
+          1,
+          1
+        ],
+        "out": [
+          100,
+          0,
+          100,
+          100
+        ]
+      },
+      {
+        "name": "c",
+        "w": 10,
+        "h": 10,
+        "cell": [
+          2,
+          0,
+          1,
+          1
+        ],
+        "out": [
+          200,
+          0,
+          1,
+          100
+        ]
+      }
+    ]
+  }
+]

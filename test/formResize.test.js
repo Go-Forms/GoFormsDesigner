@@ -29,7 +29,7 @@ const catalog = {
 function boot() {
 	const dom = install();
 	const file = path.join(__dirname, '..', 'media', 'designer.js');
-	for (const dep of ['../media/gridLayout.js', '../media/renderPlan.js', '../media/dockLayout.js']) {
+	for (const dep of ['../media/gridLayout.js', '../media/renderPlan.js', '../media/dockLayout.js', '../media/panelLayout.js', '../media/geometry.js']) {
 		delete require.cache[require.resolve(dep)];
 		require(dep);
 	}

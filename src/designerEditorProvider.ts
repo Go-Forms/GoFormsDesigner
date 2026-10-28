@@ -18,7 +18,15 @@ type InboundMessage =
 	// call rather than through setEvent). They are created first, so the file
 	// never spends a moment referencing a method that doesn't exist.
 	| { type: 'apply'; ops: import('./goTool').Op[]; handlers?: { method: string; paramType: string }[] }
-	| { type: 'wireEvent'; id: string; event: string; handler: string; paramType?: string }
+	// reveal opens the handler once it is wired - what a double-click on a
+	// control does.
+	| { type: 'wireEvent'; id: string; event: string; handler: string; paramType?: string; reveal?: boolean }
+	// The clipboard: a copy is the copied controls' whole model, kept here so
+	// it outlives the webview and pastes into another form.
+	| { type: 'copy'; data: unknown }
+	| { type: 'paste' }
+	| { type: 'viewCode' }
+	| { type: 'setStartup' }
 	| { type: 'undo' }
 	| { type: 'redo' }
 	| { type: 'gotoHandler'; id: string; event: string; handler: string };
@@ -30,7 +38,16 @@ type OutboundMessage =
 	| { type: 'error'; message: string }
 	| { type: 'info'; message: string }
 	| { type: 'parseError'; message: string }
-	| { type: 'handlerWired'; result: import('./goTool').EnsureHandlerResult; model: FormModel };
+	| { type: 'handlerWired'; result: import('./goTool').EnsureHandlerResult; model: FormModel }
+	| { type: 'pasteData'; data: unknown; sameForm: boolean };
+
+/**
+ * What Ctrl+C put on the designer's clipboard, and which form it came from.
+ * Module-level, so every open designer shares it: a control copied in one
+ * form pastes into another. A paste into a different form drops the event
+ * wirings - the handlers they name live in the form they were copied from.
+ */
+let designerClipboard: { data: unknown; source: string } | undefined;
 
 class DesignerDocumentSession {
 	private lastModel: FormModel | undefined;
@@ -137,6 +154,30 @@ class DesignerDocumentSession {
 
 			case 'gotoHandler':
 				await this.handleGotoHandler(message);
+				return;
+
+			case 'copy':
+				designerClipboard = { data: message.data, source: path.resolve(filePath) };
+				return;
+
+			case 'paste':
+				if (!designerClipboard) {
+					this.post({ type: 'info', message: 'Nothing to paste - copy a control first (Ctrl+C).' });
+					return;
+				}
+				this.post({
+					type: 'pasteData',
+					data: designerClipboard.data,
+					sameForm: designerClipboard.source === path.resolve(filePath),
+				});
+				return;
+
+			case 'viewCode':
+				await vscode.commands.executeCommand('goforms.viewCode');
+				return;
+
+			case 'setStartup':
+				await vscode.commands.executeCommand('goforms.setStartupForm', this.document.uri);
 				return;
 		}
 	}
@@ -259,7 +300,13 @@ class DesignerDocumentSession {
 		}
 	}
 
-	private async handleWireEvent(message: { id: string; event: string; handler: string; paramType?: string }): Promise<void> {
+	private async handleWireEvent(message: {
+		id: string;
+		event: string;
+		handler: string;
+		paramType?: string;
+		reveal?: boolean;
+	}): Promise<void> {
 		const filePath = this.document.uri.fsPath;
 		if (!this.lastModel) {
 			this.post({ type: 'error', message: 'Cannot wire event before the form model has loaded.' });
@@ -276,6 +323,9 @@ class DesignerDocumentSession {
 			this.lastModel = model;
 			this.noteWritten(filePath);
 			this.post({ type: 'handlerWired', result, model });
+			if (message.reveal) {
+				await this.handleGotoHandler(message);
+			}
 		} catch (err) {
 			this.undoStack.pop();
 			this.post({ type: 'error', message: describeError(err) });
@@ -433,10 +483,16 @@ export class GoFormsDesignerEditorProvider implements vscode.CustomTextEditorPro
 			vscode.Uri.joinPath(this.context.extensionUri, 'media', 'renderPlan.js')
 		);
 		// dockLayout.js is the port of GoForms' docking, so the canvas can
-		// place a docked control where the running form will.
+		// place a docked control where the running form will; panelLayout.js
+		// does the same for a FlowLayoutPanel's and a TableLayoutPanel's
+		// children, and geometry.js is the snapping and the Format commands.
 		const dockLayoutUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.context.extensionUri, 'media', 'dockLayout.js')
 		);
+		const panelLayoutUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.context.extensionUri, 'media', 'panelLayout.js')
+		);
+		const geometryUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'geometry.js'));
 		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'designer.css'));
 		const csp = [
 			`default-src 'none'`,
@@ -489,15 +545,21 @@ export class GoFormsDesignerEditorProvider implements vscode.CustomTextEditorPro
 					<div id="component-tray-items"></div>
 				</div>
 			</div>
-			<!-- One side panel with two tabs, as in the Visual Studio designer:
-			     the toolbox and the properties of whatever is selected. -->
+			<!-- One side panel with three tabs, as in the Visual Studio designer:
+			     the toolbox, the properties of whatever is selected, and the
+			     Document Outline. -->
 			<div id="side-panel">
 				<div id="side-tabs" role="tablist">
 					<button class="side-tab" data-tab="controls" role="tab">Controls</button>
 					<button class="side-tab active" data-tab="properties" role="tab">Properties</button>
+					<button class="side-tab" data-tab="outline" role="tab">Outline</button>
 				</div>
 				<div id="controls-panel" class="side-body" role="tabpanel" hidden></div>
 				<div id="properties-panel" class="side-body" role="tabpanel"></div>
+				<div id="outline-panel" class="side-body" role="tabpanel" hidden></div>
+				<!-- What the property under the mouse does, as the box under
+				     the Visual Studio property grid says it. -->
+				<div id="prop-help"></div>
 			</div>
 		</div>
 		<div id="toast-stack"></div>
@@ -505,6 +567,8 @@ export class GoFormsDesignerEditorProvider implements vscode.CustomTextEditorPro
 	<script nonce="${nonce}" src="${gridLayoutUri}"></script>
 	<script nonce="${nonce}" src="${renderPlanUri}"></script>
 	<script nonce="${nonce}" src="${dockLayoutUri}"></script>
+	<script nonce="${nonce}" src="${panelLayoutUri}"></script>
+	<script nonce="${nonce}" src="${geometryUri}"></script>
 	<script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

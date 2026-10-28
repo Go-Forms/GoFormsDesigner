@@ -52,6 +52,13 @@
 				spec.props || null,
 				spec.collection || null,
 				spec.collectionReadOnly || false,
+				// A grid's column kinds, a control's table cell and a table's
+				// tracks all change what is drawn, and a cell or track change
+				// moves the children of the table too.
+				spec.columns || null,
+				spec.cell || null,
+				spec.tableColumns || null,
+				spec.tableRows || null,
 				// Width and height matter to the renderers that lay out their
 				// own insides (DataGridView columns, TableLayoutPanel cells,
 				// a SplitContainer's ratio), so a resize must redraw them.

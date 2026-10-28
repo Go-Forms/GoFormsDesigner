@@ -314,9 +314,17 @@ function install() {
 	propsTab.dataset.tab = 'properties';
 	tabs.appendChild(propsTab);
 
+	const outlineTab = new Element('button');
+	outlineTab.className = 'side-tab';
+	outlineTab.dataset.tab = 'outline';
+	tabs.appendChild(outlineTab);
+
 	const controlsPanel = add(side, 'controls-panel', 'side-body');
 	controlsPanel.hidden = true;
 	add(side, 'properties-panel', 'side-body');
+	const outlinePanel = add(side, 'outline-panel', 'side-body');
+	outlinePanel.hidden = true;
+	add(side, 'prop-help');
 	add(app, 'toast-stack');
 
 	const posted = [];
@@ -336,7 +344,7 @@ function install() {
 		document,
 		byId,
 		posted,
-		tabs: { controls: controlsTab, properties: propsTab },
+		tabs: { controls: controlsTab, properties: propsTab, outline: outlineTab },
 		/** send delivers a message as the extension host would. */
 		send(msg) {
 			for (const fn of windowListeners.message || []) fn({ data: msg });

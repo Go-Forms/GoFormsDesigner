@@ -65,7 +65,7 @@ func reorderFile(path string) (int, error) {
 // no edits at all when the file is already in order - or when it is not shaped
 // in a way this pass can safely permute (see the file comment).
 func planReorder(r *parseResult) ([]edit, error) {
-	edits, _ := planBlockOrder(r, func(order []string) []string { return parentsFirst(r, order) })
+	edits, _ := planBlockOrder(r, nil, func(order []string) []string { return parentsFirst(r, order) })
 	return edits, nil
 }
 
@@ -74,17 +74,26 @@ func planReorder(r *parseResult) ([]edit, error) {
 // the file, and returns the edits that permute the blocks into it. ok is
 // false when the file is not shaped in a way blocks can be safely moved in
 // (see the file comment); no edits with ok true means nothing had to move.
-func planBlockOrder(r *parseResult, want func(order []string) []string) (edits []edit, ok bool) {
+//
+// only, when not nil, narrows the blocks considered to those controls: every
+// other statement is treated as one this tool does not model, so it stays
+// where it is and only has to not be hopped over. That lets one container's
+// children trade places in a file whose other blocks are not tidy enough to
+// move - a Timer whose Tick wiring sits further down, say.
+func planBlockOrder(r *parseResult, only map[string]bool, want func(order []string) []string) (edits []edit, ok bool) {
 	if r.initBody == nil {
 		return nil, false
 	}
 	stmts := r.initBody.List
 
 	// Which control each statement belongs to, "" for the ones this tool does
-	// not model.
+	// not model (or, with only, is not moving).
 	owners := make([]string, len(stmts))
 	for i, s := range stmts {
 		owners[i] = stmtOwner(r, s)
+		if only != nil && !only[owners[i]] {
+			owners[i] = ""
+		}
 	}
 
 	// A block is the run of statements owned by one control. first/last bound
@@ -327,7 +336,7 @@ func planReorderOp(r *parseResult, op Op) ([]edit, error) {
 		}
 	}
 
-	edits, ok := planBlockOrder(r, func(order []string) []string {
+	permute := func(order []string) []string {
 		out := append([]string(nil), order...)
 		next := 0
 		for i, id := range out {
@@ -336,8 +345,23 @@ func planReorderOp(r *parseResult, op Op) ([]edit, error) {
 				next++
 			}
 		}
-		return parentsFirst(r, out)
-	})
+		return out
+	}
+	// The siblings alone first: their blocks trade places and nothing else
+	// moves. If that would carry a container past a line that names it - its
+	// own children's AddControl calls - the children are moved too, back
+	// after it.
+	edits, ok := planBlockOrder(r, want, permute)
+	if !ok {
+		withKids := map[string]bool{}
+		for id := range want {
+			withKids[id] = true
+			for _, d := range descendantsOf(r, id) {
+				withKids[d] = true
+			}
+		}
+		edits, ok = planBlockOrder(r, withKids, func(order []string) []string { return parentsFirst(r, permute(order)) })
+	}
 	if !ok {
 		return nil, fmt.Errorf("initializeComponent mixes the controls' statements with hand-written code, so their order cannot be changed safely - reorder the AddControl calls by hand")
 	}

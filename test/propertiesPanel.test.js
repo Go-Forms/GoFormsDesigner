@@ -75,7 +75,7 @@ function boot(controls) {
 	// cache has to be cleared so each test gets its own instance.
 	const file = path.join(__dirname, '..', 'media', 'designer.js');
 	// Same load order as the webview: the two helper globals, then the client.
-	for (const dep of ['../media/gridLayout.js', '../media/renderPlan.js', '../media/dockLayout.js']) {
+	for (const dep of ['../media/gridLayout.js', '../media/renderPlan.js', '../media/dockLayout.js', '../media/panelLayout.js', '../media/geometry.js']) {
 		delete require.cache[require.resolve(dep)];
 		require(dep);
 	}

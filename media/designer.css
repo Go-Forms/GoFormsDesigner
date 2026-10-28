@@ -1830,3 +1830,501 @@ body {
 	pointer-events: none;
 	z-index: 20;
 }
+
+/* ---------------------------------------------------------------------
+   Ported from the NetForms designer: the selection rectangle, the context
+   menu, smart tags, the Document Outline, tables and flows by cell and by
+   order, and the visual property editors.
+   --------------------------------------------------------------------- */
+
+.align-guide.center {
+	background: var(--vscode-charts-purple, #b180d7);
+}
+
+/* The selection rectangle and what it is about to take. */
+.lasso {
+	position: absolute;
+	border: 1px dashed var(--vscode-focusBorder, #007fd4);
+	background: color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 12%, transparent);
+	pointer-events: none;
+	z-index: 30;
+}
+
+.ctrl.lasso-hit {
+	outline: 1px dashed var(--vscode-focusBorder, #007fd4);
+	outline-offset: 1px;
+}
+
+/* A hidden control is still drawn, so it can be selected - faded, and
+   dashed, so nobody takes it for what the form shows. A disabled one is
+   greyed as the running control would be. */
+.ctrl.is-hidden {
+	opacity: 0.4;
+	outline: 1px dashed var(--vscode-disabledForeground, #888);
+}
+
+.ctrl.is-disabled .ctrl-content {
+	filter: grayscale(1);
+	opacity: 0.6;
+}
+
+/* A control placed by a flow or a table cell, like a docked one, is not
+   where its own x/y say. */
+.ctrl.in-flow,
+.ctrl.in-cell {
+	outline: 1px dotted var(--vscode-charts-green, #89d185);
+	outline-offset: -2px;
+}
+
+/* ---------- Context menu ---------- */
+
+.ctx-menu {
+	position: fixed;
+	z-index: 1000;
+	min-width: 200px;
+	padding: 4px 0;
+	background: var(--vscode-menu-background, var(--vscode-editorWidget-background, #252526));
+	color: var(--vscode-menu-foreground, var(--vscode-foreground));
+	border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, #454545));
+	border-radius: 4px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+	font-size: 12px;
+}
+
+.ctx-item {
+	display: flex;
+	justify-content: space-between;
+	gap: 24px;
+	padding: 4px 14px;
+	cursor: default;
+	white-space: nowrap;
+}
+
+.ctx-item:hover:not(.disabled) {
+	background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+	color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+}
+
+.ctx-item.disabled {
+	opacity: 0.45;
+}
+
+.ctx-keys {
+	opacity: 0.7;
+}
+
+.ctx-sep {
+	height: 1px;
+	margin: 4px 0;
+	background: var(--vscode-menu-separatorBackground, var(--vscode-widget-border, #454545));
+}
+
+.ctx-sep:first-child,
+.ctx-sep + .ctx-sep,
+.ctx-sep:last-child {
+	display: none;
+}
+
+/* ---------- Smart tags and the move glyph ---------- */
+
+.smart-glyph,
+.move-glyph {
+	position: absolute;
+	z-index: 15;
+	width: 15px;
+	height: 15px;
+	line-height: 13px;
+	text-align: center;
+	font-size: 11px;
+	border: 1px solid var(--vscode-focusBorder, #007fd4);
+	background: var(--vscode-editor-background);
+	color: var(--vscode-focusBorder, #007fd4);
+	cursor: pointer;
+	user-select: none;
+}
+
+.smart-glyph {
+	top: 1px;
+	right: 1px;
+}
+
+.smart-glyph.on {
+	background: var(--vscode-focusBorder, #007fd4);
+	color: var(--vscode-editor-background);
+}
+
+.move-glyph {
+	top: 1px;
+	left: 1px;
+	cursor: move;
+}
+
+.smart-panel {
+	position: fixed;
+	z-index: 1000;
+	min-width: 190px;
+	padding: 8px 10px;
+	background: var(--vscode-editorWidget-background, #252526);
+	border: 1px solid var(--vscode-widget-border, #454545);
+	border-radius: 4px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+	font-size: 12px;
+}
+
+.smart-title {
+	font-weight: 600;
+	margin-bottom: 6px;
+}
+
+.smart-line {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 3px 0;
+}
+
+.smart-link {
+	border: none;
+	background: none;
+	padding: 0;
+	color: var(--vscode-textLink-foreground, #3794ff);
+	cursor: pointer;
+	font-size: 12px;
+	text-align: left;
+}
+
+.smart-link:hover {
+	text-decoration: underline;
+}
+
+/* ---------- Tables and flows ---------- */
+
+.cc-table .tl-line {
+	position: absolute;
+	border: 0 dashed var(--vscode-disabledForeground, #888);
+	opacity: 0.7;
+}
+
+.cc-table .tl-line.v {
+	border-left-width: 1px;
+}
+
+.cc-table .tl-line.h {
+	border-top-width: 1px;
+}
+
+.cc-table .tl-grip {
+	position: absolute;
+	z-index: 5;
+}
+
+.cc-table .tl-grip.v {
+	cursor: col-resize;
+}
+
+.cc-table .tl-grip.h {
+	cursor: row-resize;
+}
+
+.cc-table .tl-grip:hover,
+.cc-table .tl-grip.dragging {
+	background: color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 35%, transparent);
+}
+
+.cell-target {
+	position: absolute;
+	z-index: 12;
+	pointer-events: none;
+	background: color-mix(in srgb, var(--vscode-charts-green, #89d185) 25%, transparent);
+	outline: 1px solid var(--vscode-charts-green, #89d185);
+}
+
+.flow-bar {
+	position: absolute;
+	z-index: 12;
+	pointer-events: none;
+	background: var(--vscode-charts-orange, #d18616);
+}
+
+.cc-split-bar {
+	cursor: col-resize;
+}
+
+.cc-splitcontainer.horizontal .cc-split-bar {
+	cursor: row-resize;
+}
+
+.track-row select {
+	flex: 1 1 auto;
+}
+
+.track-row input[type="number"] {
+	width: 60px;
+}
+
+.track-index {
+	flex: 0 0 18px;
+	opacity: 0.7;
+	font-size: 11px;
+}
+
+/* ---------- Document Outline ---------- */
+
+.ol-node {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 4px;
+	cursor: default;
+	white-space: nowrap;
+	border-top: 2px solid transparent;
+	border-bottom: 2px solid transparent;
+}
+
+.ol-node:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.ol-node.selected {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+}
+
+.ol-node.ol-slot {
+	font-style: italic;
+	opacity: 0.8;
+}
+
+.ol-node.ol-before {
+	border-top-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.ol-node.ol-after {
+	border-bottom-color: var(--vscode-focusBorder, #007fd4);
+}
+
+.ol-node.ol-into {
+	outline: 1px solid var(--vscode-focusBorder, #007fd4);
+}
+
+.ol-fold {
+	flex: 0 0 12px;
+	cursor: pointer;
+}
+
+.ol-type {
+	opacity: 0.6;
+	font-size: 11px;
+}
+
+.ol-heading {
+	margin: 10px 0 4px;
+	font-size: 11px;
+	text-transform: uppercase;
+	opacity: 0.7;
+}
+
+/* ---------- The property panel ---------- */
+
+.prop-row label.modified {
+	font-weight: 700;
+	opacity: 1;
+}
+
+.reset-btn {
+	flex: 0 0 auto;
+	border: none;
+	background: none;
+	color: var(--vscode-foreground);
+	opacity: 0.6;
+	cursor: pointer;
+	padding: 0 2px;
+}
+
+.reset-btn:hover {
+	opacity: 1;
+}
+
+.prop-group.flash {
+	outline: 1px solid var(--vscode-focusBorder, #007fd4);
+}
+
+#prop-help {
+	flex: 0 0 auto;
+	min-height: 52px;
+	max-height: 90px;
+	overflow-y: auto;
+	padding: 6px 12px;
+	border-top: 1px solid var(--vscode-panel-border, #444);
+	font-size: 11px;
+	line-height: 1.4;
+}
+
+#prop-help b {
+	display: block;
+	margin-bottom: 2px;
+}
+
+#prop-help[hidden] {
+	display: none;
+}
+
+/* Anchor: a box with a bar to each side. */
+.anchor-box {
+	position: relative;
+	width: 84px;
+	height: 60px;
+	border: 1px solid var(--vscode-input-border, #555);
+	background: var(--vscode-input-background);
+}
+
+.anchor-control {
+	position: absolute;
+	left: 30px;
+	top: 22px;
+	width: 24px;
+	height: 16px;
+	border: 1px solid var(--vscode-foreground);
+	opacity: 0.6;
+}
+
+.anchor-bar {
+	position: absolute;
+	border: none;
+	padding: 0;
+	background: var(--vscode-disabledForeground, #777);
+	opacity: 0.35;
+	cursor: pointer;
+}
+
+.anchor-bar.on {
+	background: var(--vscode-focusBorder, #007fd4);
+	opacity: 1;
+}
+
+.anchor-bar.top {
+	left: 40px;
+	top: 3px;
+	width: 4px;
+	height: 17px;
+}
+
+.anchor-bar.bottom {
+	left: 40px;
+	bottom: 3px;
+	width: 4px;
+	height: 17px;
+}
+
+.anchor-bar.left {
+	top: 28px;
+	left: 3px;
+	height: 4px;
+	width: 25px;
+}
+
+.anchor-bar.right {
+	top: 28px;
+	right: 3px;
+	height: 4px;
+	width: 25px;
+}
+
+/* Dock: Top, Left, Fill, Right, Bottom around the middle, None below. */
+.dock-grid {
+	display: grid;
+	grid-template-columns: 22px 34px 22px;
+	grid-template-rows: 16px 26px 16px 20px;
+	gap: 2px;
+}
+
+.dock-cell {
+	border: 1px solid var(--vscode-input-border, #555);
+	background: var(--vscode-input-background);
+	color: var(--vscode-foreground);
+	padding: 0;
+	font-size: 10px;
+	cursor: pointer;
+}
+
+.dock-cell.on {
+	background: var(--vscode-focusBorder, #007fd4);
+}
+
+.dock-cell.top { grid-column: 1 / 4; grid-row: 1; }
+.dock-cell.left { grid-column: 1; grid-row: 2; }
+.dock-cell.fill { grid-column: 2; grid-row: 2; }
+.dock-cell.right { grid-column: 3; grid-row: 2; }
+.dock-cell.bottom { grid-column: 1 / 4; grid-row: 3; }
+.dock-cell.none { grid-column: 1 / 4; grid-row: 4; }
+
+.color-editor,
+.font-editor {
+	position: relative;
+	flex: 1 1 auto;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+}
+
+.color-swatch {
+	width: 22px;
+	height: 18px;
+	border: 1px solid var(--vscode-input-border, #555);
+	padding: 0;
+	cursor: pointer;
+}
+
+.color-swatch.unset {
+	background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(127, 127, 127, 0.4) 3px 5px);
+}
+
+.color-editor input[type="color"] {
+	width: 26px;
+	height: 20px;
+	padding: 0;
+	border: none;
+	background: none;
+}
+
+.color-hex {
+	width: 80px;
+	flex: 1 1 60px;
+}
+
+.color-palette {
+	display: grid;
+	grid-template-columns: repeat(8, 16px);
+	gap: 2px;
+	padding: 4px;
+	flex-basis: 100%;
+}
+
+.color-cell {
+	width: 16px;
+	height: 16px;
+	padding: 0;
+	border: 1px solid rgba(127, 127, 127, 0.6);
+	cursor: pointer;
+}
+
+.font-editor select {
+	flex: 1 1 100%;
+}
+
+.font-size {
+	width: 56px;
+}
+
+/* A long name in the outline must not widen the side panel. */
+#side-panel {
+	min-width: 0;
+	max-width: 270px;
+}
+
+.ol-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}

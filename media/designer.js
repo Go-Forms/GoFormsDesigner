@@ -63,6 +63,14 @@
 	// pageChoice is which page of a TabControl/ViewContainer is currently
 	// being designed - the canvas shows one at a time, as WinForms does.
 	const pageChoice = {};
+	// smartOpen is the control whose Tasks panel (its smart tag) is open.
+	let smartOpen = null;
+	// outlineCollapsed holds the Outline nodes folded shut.
+	const outlineCollapsed = new Set();
+	// The geometry and the panel layout ports, loaded before this file (see
+	// designerEditorProvider.ts). Read at call time, as the render plan is.
+	const geo = () => globalThis.GoFormsGeometry;
+	const panels = () => globalThis.GoFormsPanelLayout;
 
 	function $(id) {
 		return document.getElementById(id);
@@ -116,6 +124,9 @@
 				parseErrorMsg = msg.message;
 				renderAll();
 				break;
+			case 'pasteData':
+				pasteControls(msg.data, !!msg.sameForm, null);
+				break;
 			case 'handlerWired':
 				model = normalizeModel(msg.model);
 				if (msg.result.created) {
@@ -134,23 +145,38 @@
 
 	// The designer edits the file through the Go tool rather than through a
 	// TextDocument, so the editor's own undo never sees these changes - the
-	// extension keeps a snapshot history instead and these drive it.
+	// extension keeps a snapshot history instead and Ctrl+Z/Ctrl+Y drive it.
+	// The rest are the Visual Studio designer's keys: the clipboard, the
+	// arrows that nudge, Escape up a level.
 	window.addEventListener('keydown', (e) => {
+		const typing = isTypingTarget(e.target);
+		if (e.key === 'Escape' && closePopups()) {
+			e.preventDefault();
+			return;
+		}
 		// Delete removes the selection outright. It is undoable (Ctrl+Z), so
 		// a confirmation step would only be in the way - which is exactly how
 		// the WinForms designer behaves.
-		if ((e.key === 'Delete' || e.key === 'Del') && !isTypingTarget(e.target)) {
+		if ((e.key === 'Delete' || e.key === 'Del') && !typing) {
 			e.preventDefault();
 			deleteSelection();
 			return;
 		}
-		// Escape goes back to the form. It is the way out that does not
-		// depend on finding somewhere to click: a form covered edge to edge
-		// by a docked control has no background left, and then a control's
-		// properties were the only thing the panel would ever show again.
-		if (e.key === 'Escape' && !isTypingTarget(e.target)) {
+		// Escape goes up a level: to the container of the selection, then to
+		// the form. It is the way out that does not depend on finding
+		// somewhere to click: a form covered edge to edge by a docked control
+		// has no background left, and then a control's properties were the
+		// only thing the panel would ever show again.
+		if (e.key === 'Escape' && !typing) {
 			e.preventDefault();
-			selectForm();
+			selectParent();
+			return;
+		}
+		const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+		if (arrows[e.key] && !typing) {
+			e.preventDefault();
+			const [dx, dy] = arrows[e.key];
+			nudgeSelection(dx, dy, e.shiftKey, e.ctrlKey || e.metaKey ? 8 : 1);
 			return;
 		}
 		if (!(e.ctrlKey || e.metaKey)) return;
@@ -161,6 +187,24 @@
 		} else if (key === 'y' || (key === 'z' && e.shiftKey)) {
 			e.preventDefault();
 			post({ type: 'redo' });
+		} else if (typing) {
+			// Copy, paste and select-all in a property field are the field's.
+			return;
+		} else if (key === 'c') {
+			e.preventDefault();
+			copySelection();
+		} else if (key === 'x') {
+			e.preventDefault();
+			cutSelection();
+		} else if (key === 'v') {
+			e.preventDefault();
+			post({ type: 'paste' });
+		} else if (key === 'd') {
+			e.preventDefault();
+			duplicateSelection();
+		} else if (key === 'a') {
+			e.preventDefault();
+			selectAllSiblings();
 		}
 	});
 
@@ -185,6 +229,261 @@
 			.map((s) => ({ op: 'remove', id: s.id }));
 		post({ type: 'apply', ops });
 		setSelection(null, false);
+	}
+
+	// -- Selection moves ----------------------------------------------------
+
+	// selectParent is Escape: the container of the selection, or the form.
+	function selectParent() {
+		const spec = selectedId ? findControl(selectedId) : null;
+		if (spec && spec.parent && findControl(spec.parent)) {
+			setSelection(spec.parent, false);
+			updateSelectionClasses();
+			renderProperties();
+			renderOutline();
+			return;
+		}
+		selectForm();
+	}
+
+	// selectAllSiblings is Ctrl+A: everything in the container the selection
+	// is in, or on the form.
+	function selectAllSiblings() {
+		const spec = selectedId ? findControl(selectedId) : null;
+		const key = spec ? parentKey(spec.parent, spec.parentSlot) : '';
+		const ids = canvasControls().filter((c) => parentKey(c.parent, c.parentSlot) === key).map((c) => c.id);
+		if (!ids.length) return;
+		selectedIds = new Set(ids);
+		selectedId = spec && ids.includes(spec.id) ? spec.id : ids[ids.length - 1];
+		updateSelectionClasses();
+		renderProperties();
+		renderOutline();
+	}
+
+	// selectIds replaces the selection, the last id the primary one.
+	function selectIds(ids) {
+		selectedIds = new Set(ids);
+		selectedId = ids.length ? ids[ids.length - 1] : null;
+	}
+
+	// nudgeSelection is what an arrow key does, as in the Visual Studio
+	// designer: it moves the selection by a pixel (Ctrl: eight), or with
+	// Shift grows and shrinks it. A control in a flow has no position of its
+	// own - the arrows move it back or forth in the flow - and a control in
+	// a table moves from cell to cell.
+	function nudgeSelection(dx, dy, resize, step) {
+		if (locked || tabOrderMode) return;
+		const specs = selectedSpecs().filter((s) => s.supported && !isComponent(s));
+		if (!specs.length) return;
+		const parentType = (s) => (s.parent && !s.parentSlot ? (findControl(s.parent) || {}).type : '');
+
+		if (!resize && specs.length === 1 && parentType(specs[0]) === 'FlowLayoutPanel') {
+			const spec = specs[0];
+			const order = siblingsOf(spec).map((c) => c.id);
+			const i = order.indexOf(spec.id);
+			const j = i + (dx + dy > 0 ? 1 : -1);
+			if (j < 0 || j >= order.length) return;
+			[order[i], order[j]] = [order[j], order[i]];
+			post({ type: 'apply', ops: [{ op: 'reorder', id: spec.parent, order }] });
+			return;
+		}
+		if (!resize && specs.length === 1 && parentType(specs[0]) === 'TableLayoutPanel') {
+			const spec = specs[0];
+			const table = findControl(spec.parent);
+			const cell = effectiveCell(spec);
+			if (!cell) return;
+			const column = cell.column + dx, row = cell.row + dy;
+			if (column < 0 || row < 0 || column >= tracksOf(table, 'columns').length || row >= tracksOf(table, 'rows').length) return;
+			post({ type: 'apply', ops: moveToCellOps(spec, table, column, row) });
+			return;
+		}
+
+		const ops = [];
+		for (const s of specs) {
+			if (propOr(s, 'dock', 'DockNone') !== 'DockNone' || parentType(s) === 'FlowLayoutPanel' || parentType(s) === 'TableLayoutPanel') continue;
+			const b = { x: s.x, y: s.y, w: s.w, h: s.h };
+			if (resize) {
+				b.w = Math.max(1, b.w + dx * step);
+				b.h = Math.max(1, b.h + dy * step);
+			} else {
+				b.x = Math.max(0, b.x + dx * step);
+				b.y = Math.max(0, b.y + dy * step);
+			}
+			ops.push({ op: 'setBounds', id: s.id, x: b.x, y: b.y, w: b.w, h: b.h });
+		}
+		if (ops.length) post({ type: 'apply', ops });
+	}
+
+	// siblingsOf lists the canvas controls sharing spec's container, in
+	// model order - back to front, the order they are added in.
+	function siblingsOf(spec) {
+		const key = parentKey(spec.parent, spec.parentSlot);
+		return canvasControls().filter((c) => parentKey(c.parent, c.parentSlot) === key);
+	}
+
+	// zorder is Bring to Front (front) and Send to Back. The framework draws
+	// the child added last on top, so the selected controls move to the end
+	// (or the start) of their container's list - which also changes the
+	// order they dock in, exactly as it does in WinForms.
+	function zorder(front) {
+		const byKey = new Map();
+		for (const s of selectedSpecs()) {
+			if (isComponent(s) || !s.supported) continue;
+			const key = parentKey(s.parent, s.parentSlot);
+			if (!byKey.has(key)) byKey.set(key, s);
+		}
+		const ops = [];
+		for (const [key, first] of byKey) {
+			const all = siblingsOf(first).map((c) => c.id);
+			const moving = all.filter((id) => selectedIds.has(id));
+			const rest = all.filter((id) => !selectedIds.has(id));
+			const order = front ? rest.concat(moving) : moving.concat(rest);
+			if (order.join() === all.join()) continue;
+			const [parent, slot] = splitParentKey(key);
+			ops.push({ op: 'reorder', id: parent, parentSlot: slot, order });
+		}
+		if (ops.length) post({ type: 'apply', ops });
+	}
+
+	// -- Clipboard ----------------------------------------------------------
+	//
+	// The designer has the whole model of every control, so a copy is that
+	// model - the selected controls and everything standing on them - and a
+	// paste is a batch of "add" ops that rebuild it under new names. The
+	// extension keeps the copy, so it pastes into another form too.
+
+	// clipRoots are the selected controls that are not inside another
+	// selected one: copying a panel and its button copies the button once.
+	function clipRoots() {
+		const specs = selectedSpecs().filter((s) => s.supported);
+		const ids = new Set(specs.map((s) => s.id));
+		return specs.filter((s) => !isInsideAny(s.parent || '', ids));
+	}
+
+	function clipboardPayload(roots) {
+		const keep = new Set(roots.map((r) => r.id));
+		for (const r of roots) {
+			for (const c of model.controls) {
+				if (isInsideAny(c.id, new Set([r.id]))) keep.add(c.id);
+			}
+		}
+		// Model order: a container's block comes before its children's, so
+		// pasting in this order always has the parent there first.
+		const controls = model.controls.filter((c) => keep.has(c.id)).map((c) => JSON.parse(JSON.stringify(c)));
+		return { roots: roots.map((r) => r.id), controls };
+	}
+
+	function copySelection() {
+		const roots = clipRoots();
+		if (!roots.length) return;
+		post({ type: 'copy', data: clipboardPayload(roots) });
+		showToast(roots.length === 1 ? `Copied ${roots[0].id}` : `Copied ${roots.length} controls`, 'info');
+	}
+
+	function cutSelection() {
+		const roots = clipRoots();
+		if (!roots.length) return;
+		post({ type: 'copy', data: clipboardPayload(roots) });
+		deleteSelection();
+	}
+
+	// duplicateSelection is Ctrl+D: a copy of each selected control in its
+	// own container, a step down and right, without touching the clipboard.
+	function duplicateSelection() {
+		const roots = clipRoots();
+		if (!roots.length) return;
+		pasteControls(clipboardPayload(roots), true, 'own');
+	}
+
+	// pasteTarget is where a paste goes: into the selected container, or
+	// beside the selected control, or onto the form.
+	function pasteTarget() {
+		const sel = selectedId ? findControl(selectedId) : null;
+		if (!sel || isComponent(sel)) return { parent: '', slot: '' };
+		const slots = slotsFor(sel);
+		if (slots.length) {
+			const shown = slotNameFor(sel, Math.min(pageChoice[sel.id] || 0, slots.length - 1));
+			return { parent: sel.id, slot: slotChoice[sel.id] || (slots.includes(shown) ? shown : slots[0]) };
+		}
+		const desc = catalog[sel.type];
+		if (desc && desc.IsContainer) return { parent: sel.id, slot: '' };
+		return { parent: sel.parent || '', slot: sel.parentSlot || '' };
+	}
+
+	// pasteControls turns a copy into ops. sameForm keeps the event handlers,
+	// which only exist in the form the controls were copied from. target is
+	// null for "where the selection says" and 'own' for each control's own
+	// container (a duplicate).
+	function pasteControls(data, sameForm, target) {
+		if (!data || !data.controls || !data.controls.length) {
+			showToast('Nothing to paste', 'info');
+			return;
+		}
+		const taken = new Set(model.controls.map((c) => c.id));
+		const rename = new Map();
+		for (const c of data.controls) {
+			const id = taken.has(c.id) || !catalog[c.type] ? generateId(c.type, taken) : c.id;
+			taken.add(id);
+			rename.set(c.id, id);
+		}
+		const roots = new Set(data.roots);
+		const common = target === 'own' ? null : pasteTarget();
+
+		// One offset for the whole group, so its arrangement survives; enough
+		// of one that the paste does not sit exactly on what is there.
+		const firstRoot = data.controls.find((c) => roots.has(c.id) && !isComponent(c));
+		let offset = 0;
+		if (firstRoot) {
+			const key = common ? parentKey(common.parent, common.slot) : parentKey(firstRoot.parent, firstRoot.parentSlot);
+			const occupied = canvasControls().filter((c) => parentKey(c.parent, c.parentSlot) === key);
+			offset = geo().pasteOffset(firstRoot, occupied, 8);
+		}
+
+		const ops = [];
+		const pasted = [];
+		for (const c of data.controls) {
+			const desc = catalog[c.type];
+			if (!desc) continue;
+			const id = rename.get(c.id);
+			const isRoot = roots.has(c.id);
+			let parent = isRoot ? (common ? common.parent : c.parent || '') : rename.get(c.parent) || '';
+			let slot = isRoot ? (common ? common.slot : c.parentSlot || '') : c.parentSlot || '';
+			// A duplicate whose container is not on this form any more (or a
+			// copy from another form) lands on the form.
+			if (isRoot && parent && !findControl(parent)) {
+				parent = '';
+				slot = '';
+			}
+			const op = { op: 'add', id, type: c.type };
+			if (!desc.NonVisual) {
+				Object.assign(op, { parent, parentSlot: slot, x: c.x + (isRoot ? offset : 0), y: c.y + (isRoot ? offset : 0), w: c.w, h: c.h });
+				const parentSpec = isRoot ? findControl(parent) : data.controls.find((p) => p.id === c.parent);
+				if (c.cell && parentSpec && parentSpec.type === 'TableLayoutPanel' && !slot) {
+					const cols = tracksOf(parentSpec, 'columns').length, rows = tracksOf(parentSpec, 'rows').length;
+					if (c.cell.column < cols && c.cell.row < rows) op.cell = c.cell;
+				}
+			}
+			if (c.text) op.text = c.text;
+			if (c.items) op.items = c.items;
+			if (c.columns) op.columns = c.columns;
+			if (c.tableColumns) op.tableColumns = c.tableColumns;
+			if (c.tableRows) op.tableRows = c.tableRows;
+			if (c.collection) {
+				op.collection = c.collection.map((item) => (sameForm ? item : Object.assign({}, item, { handler: undefined })));
+			}
+			if (c.props && Object.keys(c.props).length) op.props = c.props;
+			if (sameForm && c.events && Object.keys(c.events).length) op.events = c.events;
+			ops.push(op);
+			// The constructor carries the text of most types; for the rest
+			// (a TextBox) it is a SetText call, which "add" does not write.
+			if (c.text && desc.Setters && desc.Setters.SetText !== undefined) {
+				ops.push({ op: 'setText', id, text: c.text });
+			}
+			if (isRoot) pasted.push(id);
+		}
+		if (!ops.length) return;
+		selectIds(pasted);
+		post({ type: 'apply', ops });
 	}
 
 	function basename(p) {
@@ -275,6 +574,7 @@
 		renderTabBadges();
 		renderTray();
 		renderProperties();
+		renderOutline();
 	}
 
 	// ---------------------------------------------------------------------
@@ -288,6 +588,11 @@
 		});
 		$('controls-panel').hidden = name !== 'controls';
 		$('properties-panel').hidden = name !== 'properties';
+		const outline = $('outline-panel');
+		if (outline) outline.hidden = name !== 'outline';
+		const help = $('prop-help');
+		if (help) help.hidden = name !== 'properties';
+		if (name === 'outline') renderOutline();
 	}
 
 	document.querySelectorAll('.side-tab').forEach((tab) => {
@@ -372,11 +677,20 @@
 		// properties. `e.target === canvas` is the test for "not on a child",
 		// since a control's own handler stops the event before it gets here.
 		canvas.addEventListener('mousedown', (e) => {
-			if (e.target === canvas) {
-				selectForm();
+			if (e.target === canvas && e.button !== 2) {
+				if (!(e.ctrlKey || e.metaKey || e.shiftKey)) selectForm();
+				// A drag on the form's background draws a selection rectangle.
+				if (!tabOrderMode) startLasso(e, '', '', canvas);
 			}
 		});
 		titleBar.addEventListener('mousedown', selectForm);
+		// Double-clicking the form wires its Load, as in Visual Studio.
+		canvas.addEventListener('dblclick', (e) => {
+			if (e.target === canvas || e.target === titleBar) wireDefaultEvent(null);
+		});
+		canvas.addEventListener('contextmenu', (e) => {
+			if (e.target === canvas || e.target === titleBar) showContextMenu(e, null, null);
+		});
 
 		scroll.appendChild(canvas);
 		return canvas;
@@ -650,9 +964,9 @@
 		setSelection(id, false);
 	}
 
-	function generateId(type) {
+	function generateId(type, taken) {
 		const base = type.charAt(0).toLowerCase() + type.slice(1);
-		const existing = new Set(model.controls.map((c) => c.id));
+		const existing = taken || new Set(model.controls.map((c) => c.id));
 		let n = 1;
 		while (existing.has(base + n)) {
 			n++;
@@ -825,6 +1139,12 @@
 				keys.add(RP.parentKey(spec.id, slot));
 			}
 		}
+		// A container whose size, padding or layout settings changed moves
+		// its own children: a flow rewraps, a table's cells resize.
+		for (const id of plan.content.concat(plan.bounds)) {
+			const spec = findControl(id);
+			if (spec && catalog[spec.type] && catalog[spec.type].IsContainer) keys.add(RP.parentKey(spec.id, ''));
+		}
 		for (const key of keys) {
 			placeChildren(key);
 		}
@@ -860,11 +1180,47 @@
 	// layoutChildren puts each child where the running form will put it. A
 	// docked control ignores its own x/y and glues itself to an edge of the
 	// parent, taking whatever the other docked siblings left - so drawing its
-	// stored bounds showed something the app never looked like.
+	// stored bounds showed something the app never looked like. A flow
+	// places its children one after another, and a table puts each in its
+	// cell, for the same reason.
 	//
-	// The rule itself is ported in media/dockLayout.js and checked against
-	// GoForms' own layout by test/dockLayout.test.js.
+	// The rules are ported in media/dockLayout.js and media/panelLayout.js
+	// and checked against GoForms' own layout by the golden tests.
 	function layoutChildren(parent, slot, host, kids) {
+		const owner = parent && !slot ? findControl(parent) : null;
+		const place = (spec, r, cls) => {
+			const el = rendered.get(spec.id);
+			if (!el || !r) return;
+			el.style.left = r.x + 'px';
+			el.style.top = r.y + 'px';
+			el.style.width = r.w + 'px';
+			el.style.height = r.h + 'px';
+			el.classList.toggle('docked', cls === 'docked');
+			el.classList.toggle('in-flow', cls === 'in-flow');
+			el.classList.toggle('in-cell', cls === 'in-cell');
+		};
+
+		if (owner && owner.type === 'FlowLayoutPanel') {
+			const rects = panels().arrangeFlow(
+				kids.map((s) => ({ w: s.w, h: s.h })),
+				{ width: owner.w, height: owner.h },
+				flowOptions(owner)
+			);
+			kids.forEach((spec, i) => place(spec, rects[i], 'in-flow'));
+			return;
+		}
+		if (owner && owner.type === 'TableLayoutPanel') {
+			const rects = panels().arrangeTable(
+				kids.map((s) => ({ x: s.x, y: s.y, w: s.w, h: s.h, cell: s.cell })),
+				tracksOf(owner, 'columns'),
+				tracksOf(owner, 'rows'),
+				{ width: owner.w, height: owner.h },
+				paddingOf(owner.props && owner.props.padding)
+			);
+			kids.forEach((spec, i) => place(spec, rects[i], rects[i].inGrid ? 'in-cell' : ''));
+			return;
+		}
+
 		const DL = globalThis.GoFormsDockLayout;
 		const boxes = kids.map((s) => ({
 			dock: propOr(s, 'dock', 'DockNone'),
@@ -878,24 +1234,104 @@
 		if (!DL.anyDocked(boxes)) {
 			for (const spec of kids) {
 				const el = rendered.get(spec.id);
-				if (el) applyBounds(el, spec);
+				if (el) {
+					applyBounds(el, spec);
+					el.classList.remove('docked', 'in-flow', 'in-cell');
+				}
 			}
 			return;
 		}
 
-		const rects = DL.arrange(boxes, hostClientSize(parent, slot, host));
+		const padding = paddingOf(owner ? owner.props && owner.props.padding : !parent ? model.formProps && model.formProps.padding : '');
+		const rects = DL.arrange(boxes, hostClientSize(parent, slot, host), padding);
 		kids.forEach((spec, i) => {
-			const el = rendered.get(spec.id);
-			const r = rects[i];
-			if (!el || !r) return;
-			el.style.left = r.x + 'px';
-			el.style.top = r.y + 'px';
-			el.style.width = r.w + 'px';
-			el.style.height = r.h + 'px';
 			// Say so, rather than leaving the user to wonder why the control
 			// won't stay where they put it.
-			el.classList.toggle('docked', propOr(spec, 'dock', 'DockNone') !== 'DockNone');
+			place(spec, rects[i], propOr(spec, 'dock', 'DockNone') !== 'DockNone' ? 'docked' : '');
 		});
+	}
+
+	// paddingOf reads a padding property's wire value - "8" or
+	// "left, top, right, bottom" - into the shape the layout ports take.
+	function paddingOf(value) {
+		const n = String(value || '')
+			.split(',')
+			.map((v) => parseFloat(v))
+			.filter((v) => Number.isFinite(v));
+		if (n.length === 1) return { left: n[0], top: n[0], right: n[0], bottom: n[0] };
+		if (n.length === 4) return { left: n[0], top: n[1], right: n[2], bottom: n[3] };
+		return { left: 0, top: 0, right: 0, bottom: 0 };
+	}
+
+	function flowOptions(flow) {
+		return {
+			direction: propOr(flow, 'flowDirection', 'FlowLeftToRight'),
+			wrap: propOr(flow, 'wrapContents', 'true') !== 'false',
+			spacing: Number(propOr(flow, 'spacing', '6')),
+			padding: paddingOf(flow.props && flow.props.padding),
+		};
+	}
+
+	// tracksOf is a table's columns or rows: the tool's list, or - for a
+	// model that predates it - as many AutoSize tracks as the constructor
+	// asks for.
+	function tracksOf(table, which) {
+		const list = which === 'columns' ? table.tableColumns : table.tableRows;
+		if (list && list.length) return list;
+		const n = Math.max(1, parseInt(propOr(table, which, '2'), 10) || 2);
+		return Array.from({ length: n }, () => ({ type: 'AutoSize' }));
+	}
+
+	// tableGridOf lays out a table's tracks in its own coordinates.
+	function tableGridOf(table) {
+		return panels().tableGrid(tracksOf(table, 'columns'), tracksOf(table, 'rows'), { width: table.w, height: table.h }, paddingOf(table.props && table.props.padding));
+	}
+
+	// effectiveCell is the cell a table's child is really in: the one its
+	// add call names, or the one AddControl's cursor gives it.
+	function effectiveCell(spec) {
+		const table = findControl(spec.parent);
+		if (!table || table.type !== 'TableLayoutPanel') return null;
+		const kids = canvasControls().filter((c) => c.parent === table.id && !c.parentSlot);
+		const cells = panels().tableCells(kids, tracksOf(table, 'columns').length);
+		const i = kids.findIndex((c) => c.id === spec.id);
+		return i < 0 ? null : cells[i];
+	}
+
+	// moveToCellOps moves a table's child to a cell, swapping it with the
+	// control already there - as dropping onto a taken cell does in Visual
+	// Studio.
+	function moveToCellOps(spec, table, column, row) {
+		const from = spec.parent === table.id ? effectiveCell(spec) : null;
+		const ops = [];
+		const occupant = canvasControls().find((c) => {
+			if (c.id === spec.id || c.parent !== table.id || c.parentSlot) return false;
+			const cell = effectiveCell(c);
+			return cell && cell.column === column && cell.row === row;
+		});
+		// Every child is pinned to its cell first: moving one auto-placed
+		// control shifts the cursor every later AddControl follows, which
+		// would move controls nobody touched.
+		for (const c of canvasControls()) {
+			if (c.parent !== table.id || c.parentSlot || c.cell || c.id === spec.id || (occupant && c.id === occupant.id)) continue;
+			const cell = effectiveCell(c);
+			if (cell && cell.row < tracksOf(table, 'rows').length) ops.push({ op: 'setCell', id: c.id, cell: { column: cell.column, row: cell.row } });
+		}
+		if (occupant && from) {
+			ops.push({ op: 'setCell', id: occupant.id, cell: spanned(occupant, from.column, from.row) });
+		}
+		const target = spanned(spec, column, row);
+		if (spec.parent === table.id) ops.push({ op: 'setCell', id: spec.id, cell: target });
+		else ops.push({ op: 'setParent', id: spec.id, parent: table.id, parentSlot: '', cell: target });
+		return ops;
+	}
+
+	// spanned keeps a control's spans when it moves to another cell.
+	function spanned(spec, column, row) {
+		const c = { column, row };
+		if (spec.cell && spec.cell.columnSpan > 1) c.columnSpan = spec.cell.columnSpan;
+		if (spec.cell && spec.cell.rowSpan > 1) c.rowSpan = spec.cell.rowSpan;
+		return c;
 	}
 
 	// hostClientSize is the area a container lays its children out in. For the
@@ -938,6 +1374,7 @@
 	// updateControlContent redraws just the inside of a control, leaving the
 	// element - and every listener on it - alone.
 	function updateControlContent(el, spec) {
+		applyStateClasses(el, spec);
 		const previous = el.querySelector(':scope > .ctrl-content');
 		let content;
 		try {
@@ -952,6 +1389,82 @@
 		}
 		wireSlotPanes(el, spec);
 		el.title = `${spec.type} · ${spec.id}`;
+	}
+
+	// applyStateClasses marks a control hidden or disabled - still drawn, so
+	// it can be selected, but visibly not as it will run - and gives the
+	// content the colors and font the framework would show. Only the
+	// controls that really apply them get them (GoForms/style.go): a
+	// Button's ForeColor is remembered and never drawn, and the canvas must
+	// not claim otherwise.
+	function applyStateClasses(el, spec) {
+		el.classList.toggle('is-hidden', propOr(spec, 'visible', 'true') === 'false');
+		el.classList.toggle('is-disabled', propOr(spec, 'enabled', 'true') === 'false');
+		const fore = ['Label', 'GroupBox'].includes(spec.type) ? cssColor(propOr(spec, 'foreColor', '')) : '';
+		const back = ['Panel', 'ScrollBox', 'FlowLayoutPanel', 'TableLayoutPanel'].includes(spec.type) ? cssColor(propOr(spec, 'backColor', '')) : '';
+		const font = ['Label', 'GroupBox'].includes(spec.type) ? parseFont(propOr(spec, 'font', '')) : null;
+		el.style.color = fore;
+		el.style.backgroundColor = back;
+		el.style.fontFamily = font && font.family ? font.family : '';
+		el.style.fontSize = font && font.size ? font.size + 'px' : '';
+		el.style.fontWeight = font && font.bold ? '700' : '';
+		el.style.fontStyle = font && font.italic ? 'italic' : '';
+	}
+
+	// cssColor turns the tool's "#rrggbb"/"#rrggbbaa" into CSS, or "".
+	function cssColor(v) {
+		const m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(String(v || '').trim());
+		if (!m) return '';
+		if (!m[2]) return '#' + m[1];
+		const n = parseInt(m[1], 16);
+		return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${(parseInt(m[2], 16) / 255).toFixed(3)})`;
+	}
+
+	// parseFont reads the tool's "family, size[, Bold][, Italic]".
+	function parseFont(v) {
+		const f = String(v || '').split(',').map((x) => x.trim());
+		if (f.length < 2) return null;
+		const styles = f.slice(2).map((x) => x.toLowerCase());
+		return { family: f[0], size: parseFloat(f[1]) || 0, bold: styles.includes('bold'), italic: styles.includes('italic') };
+	}
+
+	// defaultEventOf is what a double-click wires: the type's own first
+	// event (TextChanged, CheckedChanged, Tick...), else Click - and Load for
+	// the form. That is the [DefaultEvent] rule WinForms types follow.
+	function defaultEventOf(desc, isForm) {
+		if (isForm) return 'Load';
+		if (desc && desc.OwnEventCount > 0 && desc.Events && desc.Events.length) return desc.Events[0];
+		return desc && desc.Events && desc.Events.includes('Click') ? 'Click' : (desc && desc.Events && desc.Events[0]) || '';
+	}
+
+	// wireDefaultEvent writes the handler stub for the default event and
+	// opens it, or opens the one already wired.
+	function wireDefaultEvent(spec) {
+		const isForm = !spec;
+		const desc = isForm ? catalog.Form : catalog[spec.type];
+		const event = defaultEventOf(desc, isForm);
+		if (!event) return;
+		const events = isForm ? model.formEvents || {} : spec.events || {};
+		const id = isForm ? '' : spec.id;
+		if (events[event]) {
+			post({ type: 'gotoHandler', id, event, handler: events[event] });
+			return;
+		}
+		const handler = `${isForm ? model.receiverType : spec.id}_${event}`;
+		const paramType = (desc && desc.EventArgs && desc.EventArgs[event]) || 'EventArgs';
+		post({ type: 'wireEvent', id, event, handler, paramType, reveal: true });
+	}
+
+	// tableCellAt is the cell of a table under a mouse event, for the
+	// context menu's insert and delete - or null when there is no table
+	// there.
+	function tableCellAt(spec, e) {
+		const table = spec.type === 'TableLayoutPanel' ? spec : spec.parent && !spec.parentSlot ? findControl(spec.parent) : null;
+		if (!table || table.type !== 'TableLayoutPanel') return null;
+		const el = rendered.get(table.id);
+		if (!el) return null;
+		const r = el.getBoundingClientRect();
+		return panels().cellAt(tableGridOf(table), toFormPx((e.clientX || 0) - r.left), toFormPx((e.clientY || 0) - r.top));
 	}
 
 	// parentKey identifies one coordinate origin children are placed in: the
@@ -996,6 +1509,7 @@
 		if (desc && desc.IsContainer) classes.push('is-container');
 		d.className = classes.join(' ');
 		applyBounds(d, spec);
+		applyStateClasses(d, spec);
 		d.dataset.id = spec.id;
 		d.title = spec.supported
 			? `${spec.type} · ${spec.id}`
@@ -1040,6 +1554,17 @@
 			d.addEventListener('mousedown', (e) => {
 				const live = findControl(id);
 				if (live) onCtrlMouseDown(e, live, d);
+			});
+			// Double-click wires the control's default event (Click,
+			// TextChanged, CheckedChanged...) and goes to the handler.
+			d.addEventListener('dblclick', (e) => {
+				e.stopPropagation();
+				const live = findControl(id);
+				if (live && !tabOrderMode) wireDefaultEvent(live);
+			});
+			d.addEventListener('contextmenu', (e) => {
+				const live = findControl(id);
+				if (live) showContextMenu(e, live, tableCellAt(live, e));
 			});
 		} else {
 			// Unsupported controls are read-only: selectable (so the user can
@@ -1692,25 +2217,88 @@
 		return c;
 	}
 
+	// A table's cells are drawn where the framework puts them - dashed
+	// lines between the tracks - with a grip on each boundary: dragged, it
+	// resizes the two tracks on either side, as in the Visual Studio
+	// designer.
 	function renderTableLayoutPanel(spec) {
-		const c = contentBase('cc-layoutpanel');
-		const cols = parseInt(propOr(spec, 'columns', '2'), 10) || 2;
-		const rows = parseInt(propOr(spec, 'rows', '2'), 10) || 2;
-
-		const grid = document.createElement('div');
-		grid.className = 'cc-table-grid';
-		grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-		grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
-		for (let i = 0; i < cols * rows; i++) {
-			grid.appendChild(document.createElement('div'));
+		const c = contentBase('cc-layoutpanel cc-table');
+		const grid = tableGridOf(spec);
+		const cols = grid.colSizes.length, rows = grid.rowSizes.length;
+		const line = (cls, x, y, w, h) => {
+			const el = document.createElement('div');
+			el.className = cls;
+			el.style.left = x + 'px';
+			el.style.top = y + 'px';
+			el.style.width = w + 'px';
+			el.style.height = h + 'px';
+			c.appendChild(el);
+			return el;
+		};
+		const x1 = grid.colOffsets[0], y1 = grid.rowOffsets[0];
+		const x2 = grid.colOffsets[cols - 1] + grid.colSizes[cols - 1];
+		const y2 = grid.rowOffsets[rows - 1] + grid.rowSizes[rows - 1];
+		for (let i = 1; i < cols; i++) line('tl-line v', grid.colOffsets[i], y1, 0, y2 - y1);
+		for (let i = 1; i < rows; i++) line('tl-line h', x1, grid.rowOffsets[i], x2 - x1, 0);
+		if (!spec.tableReadOnly) {
+			for (let i = 0; i + 1 < cols; i++) {
+				const g = line('tl-grip v', grid.colOffsets[i + 1] - 3, y1, 7, y2 - y1);
+				g.title = 'Drag to resize the columns';
+				g.style.pointerEvents = 'auto';
+				g.addEventListener('mousedown', (e) => startTrackResize(e, spec.id, 'columns', i));
+			}
+			for (let i = 0; i + 1 < rows; i++) {
+				const g = line('tl-grip h', x1, grid.rowOffsets[i + 1] - 3, x2 - x1, 7);
+				g.title = 'Drag to resize the rows';
+				g.style.pointerEvents = 'auto';
+				g.addEventListener('mousedown', (e) => startTrackResize(e, spec.id, 'rows', i));
+			}
 		}
-		c.appendChild(grid);
-
 		const hint = document.createElement('div');
 		hint.className = 'cc-layout-hint';
 		hint.textContent = `Table · ${cols}×${rows}`;
 		c.appendChild(hint);
 		return c;
+	}
+
+	// startTrackResize drags the boundary after track `index`; on release the
+	// two tracks beside it are restyled (see panelLayout.resizeTracks).
+	function startTrackResize(e, id, which, index) {
+		e.stopPropagation();
+		e.preventDefault();
+		if (locked || tabOrderMode) return;
+		const table = findControl(id);
+		if (!table) return;
+		const grid = tableGridOf(table);
+		const sizes = which === 'columns' ? grid.colSizes : grid.rowSizes;
+		const grip = e.target;
+		const startPos = which === 'columns' ? e.clientX : e.clientY;
+		const startOffset = parseFloat(which === 'columns' ? grip.style.left : grip.style.top) || 0;
+		let delta = 0;
+		const move = (ev) => {
+			delta = toFormPx((which === 'columns' ? ev.clientX : ev.clientY) - startPos);
+			delta = Math.max(-sizes[index], Math.min(sizes[index + 1], delta));
+			if (which === 'columns') grip.style.left = startOffset + delta + 'px';
+			else grip.style.top = startOffset + delta + 'px';
+			grip.classList.add('dragging');
+		};
+		const up = () => {
+			document.removeEventListener('mousemove', move);
+			document.removeEventListener('mouseup', up);
+			if (Math.round(delta) === 0) return;
+			const tracks = panels().resizeTracks(tracksOf(table, which), sizes, index, delta);
+			post({
+				type: 'apply',
+				ops: [{
+					op: 'setTable',
+					id,
+					tableColumns: which === 'columns' ? tracks : tracksOf(table, 'columns'),
+					tableRows: which === 'rows' ? tracks : tracksOf(table, 'rows'),
+				}],
+			});
+		};
+		document.addEventListener('mousemove', move);
+		document.addEventListener('mouseup', up);
 	}
 
 	function renderSplitContainer(spec) {
@@ -1725,6 +2313,11 @@
 		first.dataset.slot = 'Panel1';
 		const bar = document.createElement('div');
 		bar.className = 'cc-split-bar';
+		bar.title = 'Drag to set SplitterDistance';
+		// The bar opts back into mouse events: dragging it moves the
+		// splitter, not the whole container.
+		bar.style.pointerEvents = 'auto';
+		bar.addEventListener('mousedown', (e) => startSplitterDrag(e, spec.id, vertical, first, second));
 		const second = document.createElement('div');
 		second.className = 'cc-split-pane';
 		second.dataset.slot = 'Panel2';
@@ -1741,6 +2334,48 @@
 		c.appendChild(bar);
 		c.appendChild(second);
 		return c;
+	}
+
+	// startSplitterDrag follows the mouse with a SplitContainer's splitter
+	// and, on release, writes SplitterDistance - which GoForms takes as a
+	// fraction from 0 to 1, the way Fyne's Split does.
+	function startSplitterDrag(e, id, vertical, first, second) {
+		e.stopPropagation();
+		e.preventDefault();
+		const spec = findControl(id);
+		if (!spec) return;
+		if (!(selectedIds.size === 1 && selectedId === id)) {
+			setSelection(id, false);
+			updateSelectionClasses();
+			renderProperties();
+			renderOutline();
+		}
+		if (locked || tabOrderMode) return;
+		const total = vertical ? spec.w : spec.h;
+		const start = parseFloat(propOr(spec, 'splitterDistance', '0.5')) || 0.5;
+		const origin = vertical ? e.clientX : e.clientY;
+		let ratio = start;
+		const move = (ev) => {
+			const d = toFormPx((vertical ? ev.clientX : ev.clientY) - origin);
+			ratio = Math.max(0.05, Math.min(0.95, start + (total ? d / total : 0)));
+			const pct = ratio * 100;
+			if (vertical) {
+				first.style.width = pct + '%';
+				second.style.width = 100 - pct + '%';
+			} else {
+				first.style.height = pct + '%';
+				second.style.height = 100 - pct + '%';
+			}
+		};
+		const up = () => {
+			document.removeEventListener('mousemove', move);
+			document.removeEventListener('mouseup', up);
+			const value = Math.round(ratio * 1000) / 1000;
+			if (value === Math.round(start * 1000) / 1000) return;
+			post({ type: 'apply', ops: [{ op: 'setProp', id, prop: 'splitterDistance', value: String(value) }] });
+		};
+		document.addEventListener('mousemove', move);
+		document.addEventListener('mouseup', up);
 	}
 
 	// These four draw the real item list the tool parsed out of the file
@@ -1979,13 +2614,33 @@
 		};
 		rendered.forEach(mark);
 		trayEls.forEach(mark);
+
+		// A selected container moves by its ✥ glyph: a drag inside it draws
+		// a selection rectangle among its controls instead.
+		for (const g of document.querySelectorAll('.move-glyph')) g.remove();
+		const sel = selectedIds.size === 1 && selectedId ? findControl(selectedId) : null;
+		if (sel && sel.supported && !isComponent(sel) && acceptsChildrenSpec(sel) && !locked && !tabOrderMode) {
+			const el = rendered.get(sel.id);
+			if (el) {
+				const glyph = document.createElement('div');
+				glyph.className = 'move-glyph';
+				glyph.textContent = '✥';
+				glyph.title = `Drag to move ${sel.id}`;
+				glyph.addEventListener('mousedown', (e) => {
+					const live = findControl(sel.id);
+					if (live) onCtrlMouseDown(e, live, el, true);
+				});
+				el.appendChild(glyph);
+			}
+		}
+		drawSmartTag();
 	}
 
 	// ---------------------------------------------------------------------
 	// Drag (move)
 	// ---------------------------------------------------------------------
 
-	function onCtrlMouseDown(e, spec, d) {
+	function onCtrlMouseDown(e, spec, d, forceDrag) {
 		e.stopPropagation();
 		e.preventDefault();
 
@@ -1998,6 +2653,21 @@
 		}
 
 		const additive = e.ctrlKey || e.metaKey || e.shiftKey;
+		// A press inside a container that is already the selection draws a
+		// selection rectangle among its controls, as in Visual Studio; the
+		// container itself moves by its ✥ glyph.
+		const pane = e.target && e.target.dataset && e.target.dataset.slot ? e.target : null;
+		if (!forceDrag && !additive && e.button !== 2 && selectedIds.size === 1 && selectedId === spec.id && acceptsChildrenSpec(spec) && (e.target === d || pane)) {
+			if (pane) slotChoice[spec.id] = pane.dataset.slot;
+			if (!pane && slotsFor(spec).length) {
+				// A split or paged container's own box (its splitter, its
+				// tab strip) is not somewhere controls go.
+			} else {
+				startLasso(e, spec.id, pane ? pane.dataset.slot : '', pane || d);
+				return;
+			}
+		}
+
 		// Dragging a control that is already part of a multi-selection moves
 		// the whole thing, so a plain click inside one must not collapse it.
 		if (additive) {
@@ -2009,14 +2679,15 @@
 		}
 		updateSelectionClasses();
 		renderProperties();
+		renderOutline();
 		// Picking something on the canvas is a request to look at it, so the
 		// panel shows its properties without a second click on the tab.
 		showTab('properties');
 
 		// Locked: the click above still selected the control, which is what
 		// Lock Controls is for - inspecting a finished layout without nudging
-		// it. Only the drag is refused.
-		if (locked) {
+		// it. Only the drag is refused. A right-click only selects.
+		if (locked || e.button === 2) {
 			return;
 		}
 
@@ -2026,15 +2697,15 @@
 		const parentId = parentKey(spec.parent, spec.parentSlot);
 		const members = selectedSpecs()
 			.filter((s2) => parentKey(s2.parent, s2.parentSlot) === parentId)
-			.map((s2) => ({
-				id: s2.id,
-				el: ctrlEl(s2.id),
-				origX: s2.x,
-				origY: s2.y,
-				w: s2.w,
-				h: s2.h,
-			}))
+			.map((s2) => {
+				const el = ctrlEl(s2.id);
+				const r = drawnRect(el, s2);
+				// w/h are the control's own size, which is what a move writes
+				// back - not the size docking or a table cell gives it.
+				return { id: s2.id, el, origX: r.x, origY: r.y, w: s2.w, h: s2.h, drawnW: r.w, drawnH: r.h };
+			})
 			.filter((m) => m.el);
+		const self = members.find((m) => m.id === spec.id) || { origX: spec.x, origY: spec.y, w: spec.w, h: spec.h };
 
 		dragState = {
 			id: spec.id,
@@ -2046,16 +2717,52 @@
 			dropHost: null,
 			startClientX: e.clientX,
 			startClientY: e.clientY,
-			origX: spec.x,
-			origY: spec.y,
-			w: spec.w,
-			h: spec.h,
+			origX: self.origX,
+			origY: self.origY,
+			w: self.drawnW || self.w,
+			h: self.drawnH || self.h,
 			moved: false,
-			newX: spec.x,
-			newY: spec.y,
+			newX: self.origX,
+			newY: self.origY,
+			cell: null,
+			flowIndex: null,
 		};
 		document.addEventListener('mousemove', onDragMove);
 		document.addEventListener('mouseup', onDragUp);
+	}
+
+	// drawnRect is where a control is really drawn - after docking, flowing
+	// or a table cell - which is what a drag starts from and snaps against.
+	function drawnRect(el, spec) {
+		if (!el) return { x: spec.x, y: spec.y, w: spec.w, h: spec.h };
+		const n = (v, f) => {
+			const x = parseFloat(v);
+			return Number.isFinite(x) ? x : f;
+		};
+		return { x: n(el.style.left, spec.x), y: n(el.style.top, spec.y), w: n(el.style.width, spec.w), h: n(el.style.height, spec.h) };
+	}
+
+	function acceptsChildrenSpec(spec) {
+		const desc = catalog[spec.type];
+		return !!(desc && (desc.IsContainer || slotsFor(spec).length));
+	}
+
+	// hostBox is a container's client area as the snap geometry wants it.
+	function hostBox(parent, slot) {
+		const host = containerElFor(parent, slot);
+		const size = host ? hostClientSize(parent, slot, host) : { width: model.formWidth, height: model.formHeight };
+		const owner = parent ? findControl(parent) : null;
+		const padding = paddingOf(owner ? owner.props && owner.props.padding : !parent ? model.formProps && model.formProps.padding : '');
+		return { w: size.width, h: size.height, padding };
+	}
+
+	// snapNeighbours are the drawn rects of a drag's siblings, the ones it
+	// can line up with.
+	function snapNeighbours(state) {
+		const moving = new Set(state.members.map((m) => m.id));
+		return canvasControls()
+			.filter((o) => !moving.has(o.id) && parentKey(o.parent, o.parentSlot) === state.parentId)
+			.map((o) => drawnRect(rendered.get(o.id), o));
 	}
 
 	function onDragMove(e) {
@@ -2069,10 +2776,11 @@
 
 		// The primary control decides the delta (and gets the snapping);
 		// every other member follows by exactly the same amount, so their
-		// relative arrangement survives the drag.
-		const snapped = snapPosition(dragState.origX + dx, dragState.origY + dy, dragState);
-		const appliedDX = snapped.x - dragState.origX;
-		const appliedDY = snapped.y - dragState.origY;
+		// relative arrangement survives the drag. Alt drags freely.
+		const raw = { x: dragState.origX + dx, y: dragState.origY + dy, w: dragState.w, h: dragState.h };
+		const snapped = geo().snapMove(raw, snapNeighbours(dragState), hostBox(dragState.parent, dragState.slot), e.altKey ? 0 : undefined);
+		const appliedDX = snapped.rect.x - dragState.origX;
+		const appliedDY = snapped.rect.y - dragState.origY;
 
 		for (const m of dragState.members) {
 			m.newX = Math.max(0, Math.round(m.origX + appliedDX));
@@ -2080,9 +2788,9 @@
 			m.el.style.left = m.newX + 'px';
 			m.el.style.top = m.newY + 'px';
 		}
-		dragState.newX = Math.max(0, Math.round(snapped.x));
-		dragState.newY = Math.max(0, Math.round(snapped.y));
-		showGuides(dragState);
+		dragState.newX = Math.max(0, Math.round(snapped.rect.x));
+		dragState.newY = Math.max(0, Math.round(snapped.rect.y));
+		showGuides(snapped.guides, dragState.parent, dragState.slot);
 		trackDropHost(e.clientX, e.clientY);
 	}
 
@@ -2133,17 +2841,64 @@
 	function trackDropHost(clientX, clientY) {
 		const movingIds = new Set(dragState.members.map((m) => m.id));
 		const host = dropHostAt(clientX, clientY, movingIds);
-		const changed = !host || host.parent !== dragState.parent || host.slot !== dragState.slot;
+		const changed = !!host && (host.parent !== dragState.parent || host.slot !== dragState.slot);
 		if (dragState.dropHost && dragState.dropHost.el !== (host && host.el)) {
 			dragState.dropHost.el.classList.remove('drop-host');
 		}
 		// Highlight only a host that would actually move the control:
 		// outlining the container it is already in reads as a pending change
 		// that isn't one.
-		dragState.dropHost = host && changed ? host : null;
+		dragState.dropHost = changed ? host : null;
 		if (dragState.dropHost) {
 			dragState.dropHost.el.classList.add('drop-host');
 		}
+
+		// A table takes the drop into the cell under the mouse, a flow at a
+		// place in its order - whether the control comes from outside or is
+		// being moved inside it.
+		const target = host || { el: containerElFor(dragState.parent, dragState.slot), parent: dragState.parent, slot: dragState.slot };
+		const owner = target.parent && !target.slot ? findControl(target.parent) : null;
+		clearCellMarks();
+		dragState.cell = null;
+		dragState.flowIndex = null;
+		dragState.layoutTarget = null;
+		if (!owner || !target.el) return;
+		const r = target.el.getBoundingClientRect();
+		const p = { x: toFormPx(clientX - r.left), y: toFormPx(clientY - r.top) };
+		if (owner.type === 'TableLayoutPanel') {
+			const grid = tableGridOf(owner);
+			const cell = panels().cellAt(grid, p.x, p.y);
+			dragState.cell = cell;
+			dragState.layoutTarget = owner;
+			const mark = document.createElement('div');
+			mark.className = 'cell-target';
+			mark.style.left = grid.colOffsets[cell.column] + 'px';
+			mark.style.top = grid.rowOffsets[cell.row] + 'px';
+			mark.style.width = grid.colSizes[cell.column] + 'px';
+			mark.style.height = grid.rowSizes[cell.row] + 'px';
+			target.el.appendChild(mark);
+		} else if (owner.type === 'FlowLayoutPanel') {
+			const kids = canvasControls().filter((c) => c.parent === owner.id && !c.parentSlot && !movingIds.has(c.id));
+			const rects = kids.map((c) => drawnRect(rendered.get(c.id), c));
+			const ins = panels().flowInsert(rects, p.x, p.y, flowOptions(owner).direction);
+			dragState.flowIndex = ins.index;
+			dragState.flowOrder = kids.map((c) => c.id);
+			dragState.layoutTarget = owner;
+			const pad = paddingOf(owner.props && owner.props.padding);
+			const bar = ins.bar || { x: pad.left + 2, y: pad.top + 2, w: 2, h: 24 };
+			const mark = document.createElement('div');
+			mark.className = 'flow-bar';
+			mark.style.left = bar.x + 'px';
+			mark.style.top = bar.y + 'px';
+			mark.style.width = bar.w + 'px';
+			mark.style.height = bar.h + 'px';
+			target.el.appendChild(mark);
+		}
+	}
+
+	function clearCellMarks() {
+		document.querySelectorAll('.cell-target').forEach((el) => el.remove());
+		document.querySelectorAll('.flow-bar').forEach((el) => el.remove());
 	}
 
 	function clearDropHost() {
@@ -2164,70 +2919,25 @@
 		};
 	}
 
-	// Snapping lines a dragged control up with its siblings' edges and
-	// centres, which is what makes a hand-placed layout look deliberate.
-	// GUIDE_SNAP is the grab distance in canvas pixels.
-	const GUIDE_SNAP = 5;
-
-	// snapCandidates lists the positions a moving edge could land on to be
-	// flush with a stationary one: left-to-left, right-to-right, and
-	// centre-to-centre.
-	function snapCandidates(otherStart, otherSize, movingSize) {
-		return [
-			otherStart,
-			otherStart + otherSize - movingSize,
-			otherStart + otherSize / 2 - movingSize / 2,
-		];
-	}
-
-	function snapPosition(rawX, rawY, state) {
-		const moving = new Set(state.members.map((m) => m.id));
-		let best = { x: rawX, y: rawY };
-		let bestDX = GUIDE_SNAP + 1;
-		let bestDY = GUIDE_SNAP + 1;
-
-		for (const other of model.controls) {
-			if (moving.has(other.id) || parentKey(other.parent, other.parentSlot) !== state.parentId) continue;
-
-			for (const cand of snapCandidates(other.x, other.w, state.w)) {
-				const d = Math.abs(rawX - cand);
-				if (d < GUIDE_SNAP && d < bestDX) {
-					bestDX = d;
-					best.x = cand;
-				}
-			}
-			for (const cand of snapCandidates(other.y, other.h, state.h)) {
-				const d = Math.abs(rawY - cand);
-				if (d < GUIDE_SNAP && d < bestDY) {
-					bestDY = d;
-					best.y = cand;
-				}
-			}
-		}
-		return best;
-	}
-
-	// showGuides draws a line wherever the dragged control's edge currently
-	// coincides with a sibling's, so the snap is visible rather than magic.
-	function showGuides(state) {
+	// showGuides draws the snap lines geometry.js reports, so a snap is
+	// visible rather than magic.
+	function showGuides(guides, parent, slot) {
 		clearGuides();
-		const host = containerElFor(state.parent, state.slot);
+		const host = containerElFor(parent, slot);
 		if (!host) return;
-		const moving = new Set(state.members.map((m) => m.id));
-
-		const add = (cls, prop, value) => {
-			const g = document.createElement('div');
-			g.className = 'align-guide ' + cls;
-			g.style[prop] = value + 'px';
-			host.appendChild(g);
-		};
-
-		for (const other of model.controls) {
-			if (moving.has(other.id) || parentKey(other.parent, other.parentSlot) !== state.parentId) continue;
-			if (other.x === state.newX) add('vertical', 'left', other.x);
-			else if (other.x + other.w === state.newX + state.w) add('vertical', 'left', other.x + other.w);
-			if (other.y === state.newY) add('horizontal', 'top', other.y);
-			else if (other.y + other.h === state.newY + state.h) add('horizontal', 'top', other.y + other.h);
+		for (const g of guides) {
+			const el = document.createElement('div');
+			el.className = 'align-guide ' + (g.axis === 'x' ? 'vertical' : 'horizontal') + (g.kind === 'center' ? ' center' : '');
+			if (g.axis === 'x') {
+				el.style.left = g.pos + 'px';
+				el.style.top = g.from + 'px';
+				el.style.height = Math.max(0, g.to - g.from) + 'px';
+			} else {
+				el.style.top = g.pos + 'px';
+				el.style.left = g.from + 'px';
+				el.style.width = Math.max(0, g.to - g.from) + 'px';
+			}
+			host.appendChild(el);
 		}
 	}
 
@@ -2239,12 +2949,39 @@
 		document.removeEventListener('mousemove', onDragMove);
 		document.removeEventListener('mouseup', onDragUp);
 		clearGuides();
-		const host = dragState && dragState.dropHost;
+		clearCellMarks();
+		const state = dragState;
+		dragState = null;
+		const host = state && state.dropHost;
 		clearDropHost();
+		if (!state || !state.moved) return;
 
-		if (dragState && dragState.moved) {
-			const ops = [];
-			for (const m of dragState.members) {
+		const ops = [];
+		const layout = state.layoutTarget;
+		if (layout && layout.type === 'TableLayoutPanel' && state.cell) {
+			// The control dragged lands in the cell under the mouse (swapping
+			// with the one there); any others it was dragged with go into the
+			// table's next free cells.
+			const primary = findControl(state.id);
+			if (primary) ops.push(...moveToCellOps(primary, layout, state.cell.column, state.cell.row));
+			for (const m of state.members) {
+				if (m.id === state.id) continue;
+				const spec = findControl(m.id);
+				if (spec && spec.parent !== layout.id) ops.push({ op: 'setParent', id: m.id, parent: layout.id, parentSlot: '' });
+			}
+		} else if (layout && layout.type === 'FlowLayoutPanel' && state.flowIndex !== null) {
+			// A flow has no positions, only an order: the dragged controls go
+			// in at the mark, in the order they had.
+			const moving = canvasControls().filter((c) => state.members.some((m) => m.id === c.id)).map((c) => c.id);
+			for (const id of moving) {
+				const spec = findControl(id);
+				if (spec && (spec.parent !== layout.id || spec.parentSlot)) ops.push({ op: 'setParent', id, parent: layout.id, parentSlot: '' });
+			}
+			const order = state.flowOrder.slice();
+			order.splice(state.flowIndex, 0, ...moving);
+			ops.push({ op: 'reorder', id: layout.id, order });
+		} else {
+			for (const m of state.members) {
 				if (m.newX === undefined) continue;
 				if (host) {
 					// The move and the reparent are one action: the control's
@@ -2257,11 +2994,70 @@
 					ops.push({ op: 'setBounds', id: m.id, x: m.newX, y: m.newY, w: m.w, h: m.h });
 				}
 			}
-			if (ops.length) {
-				post({ type: 'apply', ops });
-			}
 		}
-		dragState = null;
+		if (ops.length) {
+			post({ type: 'apply', ops });
+		} else {
+			// Nothing to write (a docked control dragged): put it back.
+			prevDigests = [];
+			renderCanvas();
+		}
+	}
+
+	// ---------------------------------------------------------------------
+	// Selection rectangle
+	// ---------------------------------------------------------------------
+	//
+	// A drag on the form's background - or inside a selected container -
+	// draws a rectangle, and every control of that container it touches is
+	// selected on release, as in Visual Studio. Ctrl or Shift adds to the
+	// selection instead of replacing it.
+
+	function startLasso(e, parent, slot, hostEl) {
+		if (e.button === 2) return;
+		const additive = e.ctrlKey || e.metaKey || e.shiftKey;
+		const base = additive ? [...selectedIds] : [];
+		const hostRect = hostEl.getBoundingClientRect();
+		const at = (ev) => ({ x: toFormPx((ev.clientX || 0) - hostRect.left), y: toFormPx((ev.clientY || 0) - hostRect.top) });
+		const origin = at(e);
+		const key = parentKey(parent, slot);
+		const box = document.createElement('div');
+		box.className = 'lasso';
+		let rect = null;
+		const hits = () => {
+			const rects = canvasControls()
+				.filter((c) => parentKey(c.parent, c.parentSlot) === key)
+				.map((c) => Object.assign({ id: c.id }, drawnRect(rendered.get(c.id), c)));
+			return geo().lassoSelect(rects, rect);
+		};
+		const move = (ev) => {
+			const q = at(ev);
+			if (!rect && Math.abs(q.x - origin.x) + Math.abs(q.y - origin.y) < 4) return;
+			if (!rect) hostEl.appendChild(box);
+			rect = geo().normalize(origin, q);
+			box.style.left = rect.x + 'px';
+			box.style.top = rect.y + 'px';
+			box.style.width = rect.w + 'px';
+			box.style.height = rect.h + 'px';
+			const ids = new Set(hits());
+			rendered.forEach((el, id) => el.classList.toggle('lasso-hit', ids.has(id)));
+		};
+		const up = () => {
+			document.removeEventListener('mousemove', move);
+			document.removeEventListener('mouseup', up);
+			box.remove();
+			rendered.forEach((el) => el.classList.remove('lasso-hit'));
+			if (!rect) return;
+			const ids = hits();
+			if (!ids.length && !additive) return;
+			selectIds(base.filter((id) => !ids.includes(id)).concat(ids));
+			updateSelectionClasses();
+			renderProperties();
+			renderOutline();
+			showTab('properties');
+		};
+		document.addEventListener('mousemove', move);
+		document.addEventListener('mouseup', up);
 	}
 
 	// ---------------------------------------------------------------------
@@ -2281,9 +3077,14 @@
 		updateSelectionClasses();
 		renderProperties();
 
+		const drawn = drawnRect(d, spec);
 		resizeState = {
 			id: spec.id,
 			el: d,
+			parent: spec.parent || '',
+			slot: spec.parentSlot || '',
+			drawnX: drawn.x,
+			drawnY: drawn.y,
 			startClientX: e.clientX,
 			startClientY: e.clientY,
 			x: spec.x,
@@ -2306,8 +3107,21 @@
 			resizeState.moved = true;
 		}
 		if (!resizeState.moved) return;
-		const nw = Math.max(10, Math.round(resizeState.origW + dx));
-		const nh = Math.max(10, Math.round(resizeState.origH + dy));
+		let nw = Math.max(10, Math.round(resizeState.origW + dx));
+		let nh = Math.max(10, Math.round(resizeState.origH + dy));
+		// The edges being pulled snap to the neighbours' and the container's,
+		// as a move does; Alt resizes freely.
+		const state = { parentId: parentKey(resizeState.parent, resizeState.slot), members: [{ id: resizeState.id }] };
+		const snapped = geo().snapResize(
+			{ x: resizeState.drawnX, y: resizeState.drawnY, w: nw, h: nh },
+			['e', 's'],
+			snapNeighbours(state),
+			hostBox(resizeState.parent, resizeState.slot),
+			e.altKey ? 0 : undefined
+		);
+		nw = Math.max(10, Math.round(snapped.rect.w));
+		nh = Math.max(10, Math.round(snapped.rect.h));
+		showGuides(snapped.guides, resizeState.parent, resizeState.slot);
 		resizeState.el.style.width = nw + 'px';
 		resizeState.el.style.height = nh + 'px';
 		resizeState.newW = nw;
@@ -2317,6 +3131,7 @@
 	function onResizeUp() {
 		document.removeEventListener('mousemove', onResizeMove);
 		document.removeEventListener('mouseup', onResizeUp);
+		clearGuides();
 		if (resizeState && resizeState.moved) {
 			post({
 				type: 'apply',
@@ -2439,12 +3254,14 @@
 		propsDigest = digest;
 
 		// Rebuilding would otherwise jump back to the top, so the property
-		// just changed scrolls out of sight the moment it is changed.
-		const scroll = panel.scrollTop;
+		// just changed scrolls out of sight the moment it is changed - and
+		// the field the user was in, with whatever they had typed and not yet
+		// committed, would be gone.
+		const snap = inspectorSnapshot(panel, selectedId || '');
 		panel.innerHTML = '';
 		if (!spec) {
 			appendFormGroup(panel);
-			panel.scrollTop = scroll;
+			restoreInspector(panel, snap, '');
 			return;
 		}
 
@@ -2483,7 +3300,10 @@
 			appendNameGroup(panel, spec);
 			appendParentGroup(panel, spec);
 			appendBoundsGroup(panel, spec, false);
+			const parent = spec.parent && !spec.parentSlot ? findControl(spec.parent) : null;
+			if (parent && parent.type === 'TableLayoutPanel') appendCellGroup(panel, spec);
 		}
+		if (spec.type === 'TableLayoutPanel') appendTableGroup(panel, spec);
 
 		if (desc && desc.Setters && desc.Setters.SetText !== undefined) {
 			appendTextGroup(panel, spec);
@@ -2513,55 +3333,107 @@
 		}
 
 		appendDeleteButton(panel, spec);
-		panel.scrollTop = scroll;
+		restoreInspector(panel, snap, selectedId || '');
 	}
 
-	// appendNameGroup renames the control: the struct field, every reference
-	// to it, and any handler still named after it. The tool refuses invalid
-	// or already-taken names, so this only has to reset the box on failure.
-	// appendAlignGroup offers the WinForms Format menu's alignment commands
-	// for a multi-selection. Everything aligns to the primary control - the
-	// last one clicked - which is the same rule the WinForms designer uses.
+	// inspectorSnapshot records what a rebuild of the panel must not lose:
+	// the scroll position, the field with the focus, and what is typed in it
+	// but not committed yet - as long as the panel still shows the same
+	// control.
+	function inspectorSnapshot(panel, key) {
+		const snap = { key: panel.dataset.key, scroll: panel.scrollTop, focus: null };
+		panel.dataset.key = key;
+		const a = document.activeElement;
+		if (!a || !panel.contains || !panel.contains(a)) return snap;
+		const row = a.closest && a.closest('[data-prop]');
+		if (!row) return snap;
+		snap.focus = {
+			prop: row.dataset.prop,
+			tag: a.tagName,
+			check: a.type === 'checkbox' ? a.dataset.style || a.value : null,
+			value: a.tagName === 'INPUT' && a.dataset.initial !== undefined && a.value !== a.dataset.initial ? a.value : null,
+			start: a.selectionStart,
+			end: a.selectionEnd,
+		};
+		return snap;
+	}
+
+	function restoreInspector(panel, snap, key) {
+		if (snap.key !== key) return;
+		panel.scrollTop = snap.scroll;
+		const f = snap.focus;
+		if (!f) return;
+		const row = [...panel.querySelectorAll('.prop-row')].concat([...panel.querySelectorAll('.coll-row')]).find((r) => r.dataset.prop === f.prop);
+		if (!row) return;
+		const fields = row.descendants ? row.descendants : [...row.querySelectorAll('*')];
+		const target = fields.find((el) => el.tagName === f.tag && (f.check === null || el.dataset.style === f.check || el.value === f.check));
+		if (!target || target.disabled) return;
+		if (f.value !== null) target.value = f.value;
+		target.focus({ preventScroll: true });
+		if (f.value !== null && target.setSelectionRange && f.start !== null && f.start !== undefined) {
+			try {
+				target.setSelectionRange(f.start, f.end);
+			} catch {
+				// Number inputs have no selection to restore.
+			}
+		}
+	}
+
+	// appendAlignGroup offers the WinForms Format menu's alignment and
+	// spacing commands for a multi-selection. Everything aligns to the
+	// primary control - the last one clicked - which is the same rule the
+	// WinForms designer uses.
 	function appendAlignGroup(panel) {
 		const g = groupEl(`Align ${selectedIds.size} controls`);
 
 		const commands = [
-			['Left', (s, a) => ({ x: a.x })],
-			['Right', (s, a) => ({ x: a.x + a.w - s.w })],
-			['Top', (s, a) => ({ y: a.y })],
-			['Bottom', (s, a) => ({ y: a.y + a.h - s.h })],
-			['Centre H', (s, a) => ({ x: a.x + a.w / 2 - s.w / 2 })],
-			['Centre V', (s, a) => ({ y: a.y + a.h / 2 - s.h / 2 })],
-			['Same width', (s, a) => ({ w: a.w })],
-			['Same height', (s, a) => ({ h: a.h })],
+			['Left', 'left'],
+			['Centre', 'center'],
+			['Right', 'right'],
+			['Top', 'top'],
+			['Middle', 'middle'],
+			['Bottom', 'bottom'],
+			['Same width', 'sameWidth'],
+			['Same height', 'sameHeight'],
+			['Same size', 'sameSize'],
+			['Space across', 'spaceX'],
+			['Space down', 'spaceY'],
 		];
 
 		const row = document.createElement('div');
 		row.className = 'align-buttons';
-		for (const [label, compute] of commands) {
+		for (const [label, how] of commands) {
 			const btn = document.createElement('button');
 			btn.className = 'align-btn';
 			btn.textContent = label;
-			btn.addEventListener('click', () => applyAlign(compute));
+			btn.dataset.align = how;
+			if ((how === 'spaceX' || how === 'spaceY') && selectedIds.size < 3) btn.disabled = true;
+			btn.addEventListener('click', () => applyAlign(how));
 			row.appendChild(btn);
 		}
 		g.appendChild(row);
 
 		const hint = document.createElement('div');
 		hint.className = 'hint';
-		hint.textContent = 'Aligns to the last-clicked control. Ctrl or Shift click to extend the selection.';
+		hint.textContent = 'Aligns to the last-clicked control; spacing evens the gaps between the first and the last. Ctrl or Shift click to extend the selection.';
 		g.appendChild(hint);
 		panel.appendChild(g);
 	}
 
-	function applyAlign(compute) {
+	// applyAlign runs one Format command (see geometry.js) over the selected
+	// controls of the primary one's container.
+	function applyAlign(how) {
 		const anchor = findControl(selectedId);
 		if (!anchor) return;
+		const key = parentKey(anchor.parent, anchor.parentSlot);
+		const specs = selectedSpecs().filter((s) => !isComponent(s) && parentKey(s.parent, s.parentSlot) === key);
+		const rects = {};
+		for (const s of specs) rects[s.id] = { x: s.x, y: s.y, w: s.w, h: s.h };
+		const out = how === 'spaceX' ? geo().spaceEvenly(rects, 'x') : how === 'spaceY' ? geo().spaceEvenly(rects, 'y') : geo().align(rects, anchor.id, how);
 
 		const ops = [];
-		for (const spec of selectedSpecs()) {
-			if (spec.id === anchor.id) continue;
-			const next = Object.assign({ x: spec.x, y: spec.y, w: spec.w, h: spec.h }, compute(spec, anchor));
+		for (const spec of specs) {
+			const next = out[spec.id];
 			if (next.x === spec.x && next.y === spec.y && next.w === spec.w && next.h === spec.h) {
 				continue;
 			}
@@ -2579,6 +3451,9 @@
 		}
 	}
 
+	// appendNameGroup renames the control: the struct field, every reference
+	// to it, and any handler still named after it. The tool refuses invalid
+	// or already-taken names, so this only has to reset the box on failure.
 	function appendNameGroup(panel, spec) {
 		const g = groupEl('Name');
 		const row = document.createElement('div');
@@ -2680,6 +3555,7 @@
 	function groupEl(title) {
 		const g = document.createElement('div');
 		g.className = 'prop-group';
+		g.dataset.group = title;
 		const t = document.createElement('div');
 		t.className = 'prop-group-title';
 		t.textContent = title;
@@ -3205,101 +4081,471 @@
 		return [...props].sort((a, b) => a.localeCompare(b));
 	}
 
+	// BASE_PROPS are the properties every control inherits from ControlBase.
+	// They go in a group of their own below the type's own, the way the
+	// Visual Studio grid keeps Layout and Appearance apart from what makes a
+	// control that control.
+	const BASE_PROPS = ['anchor', 'dock', 'padding', 'tabIndex', 'tabStop', 'visible', 'enabled', 'foreColor', 'backColor', 'font'];
+
 	function appendPropsGroup(panel, spec, props, desc) {
-		const g = groupEl('Properties');
-		for (const prop of props) {
+		const own = props.filter((p) => !BASE_PROPS.includes(p) || spec.type === 'Form');
+		const base = BASE_PROPS.filter((p) => props.includes(p) && spec.type !== 'Form');
+		const build = (title, list) => {
+			if (!list.length) return;
+			const g = groupEl(title);
+			for (const prop of list) g.appendChild(propertyRow(spec, desc, prop));
+			panel.appendChild(g);
+		};
+		build('Properties', own);
+		build('Layout and appearance', base);
+	}
+
+	// propertyRow is one property: its name (bold when the file sets it),
+	// its editor, and ↺ to put it back to its default by deleting the line
+	// that sets it.
+	function propertyRow(spec, desc, prop) {
+		const row = document.createElement('div');
+		row.className = 'prop-row';
+		row.dataset.prop = prop;
+		const label = document.createElement('label');
+		label.textContent = prop;
+		const set = spec.props && spec.props[prop] !== undefined && spec.props[prop] !== '';
+		const resettable = set && !(desc && desc.CtorProps && desc.CtorProps.includes(prop));
+		if (resettable) label.classList.add('modified');
+		row.appendChild(label);
+		row.appendChild(propEditor(spec, desc, prop));
+		if (resettable) {
+			const reset = document.createElement('button');
+			reset.className = 'reset-btn';
+			reset.textContent = '↺';
+			reset.title = 'Reset to the default (deletes the line that sets it)';
+			reset.addEventListener('click', () => post({ type: 'apply', ops: [{ op: 'resetProp', id: spec.id, prop }] }));
+			row.appendChild(reset);
+		}
+		const help = desc && desc.Descriptions && desc.Descriptions[prop];
+		if (help) row.title = help;
+		row.addEventListener('mouseenter', () => showHelp(prop, help));
+		row.addEventListener('focusin', () => showHelp(prop, help));
+		return row;
+	}
+
+	// showHelp fills the box under the property panel with what the property
+	// or event under the mouse does.
+	function showHelp(name, text) {
+		const box = $('prop-help');
+		if (!box) return;
+		box.innerHTML = '';
+		const b = document.createElement('b');
+		b.textContent = name;
+		const t = document.createElement('div');
+		t.textContent = text || '';
+		box.appendChild(b);
+		box.appendChild(t);
+	}
+
+	// propEditor is the editor for one property, by its kind: a checkbox, a
+	// spinner, a dropdown, a row of flags - and for Anchor, Dock, a color, a
+	// font and a padding, the visual editors the Visual Studio grid has.
+	function propEditor(spec, desc, prop) {
+		const current = (spec.props && spec.props[prop]) || '';
+		const kind = propKind(desc, prop);
+		const send = (value) => {
+			post({ type: 'apply', ops: [{ op: 'setProp', id: spec.id, prop, value }] });
+		};
+		const textInput = (type, value, commit) => {
+			const input = document.createElement('input');
+			input.type = type;
+			input.value = value;
+			input.dataset.initial = value;
+			input.addEventListener('change', () => commit(input.value));
+			input.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') input.blur();
+			});
+			return input;
+		};
+
+		if (prop === 'anchor' && kind === 'flags') return anchorEditor(desc, prop, current, send);
+		if (prop === 'dock' && kind === 'enum') return dockEditor(desc, prop, current, send);
+
+		if (kind === 'bool') {
+			const input = document.createElement('input');
+			input.type = 'checkbox';
+			// visible and enabled are true until something says otherwise.
+			const dflt = prop === 'visible' || prop === 'enabled' ? 'true' : 'false';
+			input.checked = (current || dflt) === 'true';
+			input.addEventListener('change', () => send(input.checked ? 'true' : 'false'));
+			return input;
+		}
+		if (kind === 'enum') {
+			const select = document.createElement('select');
+			const values = (desc && desc.Enums && desc.Enums[prop]) || [];
+			// An unset enum shows a blank entry rather than silently
+			// claiming the first value is already in the source.
+			if (!current) {
+				const blank = document.createElement('option');
+				blank.value = '';
+				blank.textContent = '(default)';
+				select.appendChild(blank);
+			}
+			for (const v of values) {
+				const opt = document.createElement('option');
+				opt.value = v;
+				opt.textContent = v;
+				if (v === current) opt.selected = true;
+				select.appendChild(opt);
+			}
+			select.addEventListener('change', () => {
+				if (select.value) send(select.value);
+			});
+			return select;
+		}
+		if (kind === 'flags') {
+			// A flag set is a row of checkboxes; the wire value is the
+			// comma-joined list of the ticked names.
+			const values = (desc && desc.Enums && desc.Enums[prop]) || [];
+			const on = new Set(current ? current.split(',').map((v) => v.trim()) : []);
+			const box = document.createElement('div');
+			box.className = 'flag-set';
+			for (const v of values) {
+				const item = document.createElement('label');
+				item.className = 'flag-item';
+				const cb = document.createElement('input');
+				cb.type = 'checkbox';
+				cb.checked = on.has(v);
+				cb.addEventListener('change', () => {
+					if (cb.checked) on.add(v);
+					else on.delete(v);
+					send(values.filter((n) => on.has(n)).join(','));
+				});
+				const text = document.createElement('span');
+				// "AnchorTop" reads better as just "Top" in a row of four.
+				text.textContent = v.replace(/^[A-Z][a-z]+(?=[A-Z])/, '');
+				item.appendChild(cb);
+				item.appendChild(text);
+				box.appendChild(item);
+			}
+			return box;
+		}
+		if (kind === 'number') {
+			return textInput('number', current, (v) => {
+				if (v.trim() !== '') send(v.trim());
+			});
+		}
+		if (kind === 'color') return colorEditor(current, send, textInput);
+		if (kind === 'font') return fontEditor(current, send);
+		if (kind === 'padding') {
+			const input = textInput('text', current, (v) => {
+				if (v.trim() !== '') send(v.trim());
+			});
+			input.placeholder = 'all, or left, top, right, bottom';
+			return input;
+		}
+		return textInput('text', current, send);
+	}
+
+	// anchorEditor is Anchor as Visual Studio edits it: a box with a bar to
+	// each side, each bar on or off.
+	function anchorEditor(desc, prop, current, send) {
+		const values = (desc && desc.Enums && desc.Enums[prop]) || [];
+		const on = new Set(current ? current.split(',').map((v) => v.trim()) : []);
+		const box = document.createElement('div');
+		box.className = 'anchor-box';
+		const middle = document.createElement('div');
+		middle.className = 'anchor-control';
+		box.appendChild(middle);
+		for (const v of values) {
+			const side = v.replace(/^Anchor/, '');
+			const bar = document.createElement('button');
+			bar.className = 'anchor-bar ' + side.toLowerCase() + (on.has(v) ? ' on' : '');
+			bar.title = side;
+			bar.dataset.side = side;
+			bar.addEventListener('click', () => {
+				if (on.has(v)) on.delete(v);
+				else on.add(v);
+				send(values.filter((n) => on.has(n)).join(','));
+			});
+			box.appendChild(bar);
+		}
+		return box;
+	}
+
+	// dockEditor is Dock as Visual Studio edits it: Top, Left, Fill, Right
+	// and Bottom around the middle, None below.
+	function dockEditor(desc, prop, current, send) {
+		const values = (desc && desc.Enums && desc.Enums[prop]) || [];
+		const grid = document.createElement('div');
+		grid.className = 'dock-grid';
+		const value = current || 'DockNone';
+		for (const v of ['DockTop', 'DockLeft', 'DockFill', 'DockRight', 'DockBottom', 'DockNone']) {
+			if (!values.includes(v)) continue;
+			const place = v.replace(/^Dock/, '');
+			const b = document.createElement('button');
+			b.className = 'dock-cell ' + place.toLowerCase() + (value === v ? ' on' : '');
+			b.title = place;
+			b.dataset.dock = v;
+			b.textContent = place === 'None' ? 'None' : '';
+			b.addEventListener('click', () => send(v));
+			grid.appendChild(b);
+		}
+		return grid;
+	}
+
+	// The palette the color editor offers, Visual Studio's Custom tab.
+	const PALETTE = [
+		'#ffffff', '#ffc0c0', '#ffe0c0', '#ffffc0', '#c0ffc0', '#c0ffff', '#c0c0ff', '#ffc0ff',
+		'#e0e0e0', '#ff8080', '#ffc080', '#ffff80', '#80ff80', '#80ffff', '#8080ff', '#ff80ff',
+		'#c0c0c0', '#ff0000', '#ff8000', '#ffff00', '#00ff00', '#00ffff', '#0000ff', '#ff00ff',
+		'#808080', '#c00000', '#c04000', '#c0c000', '#00c000', '#00c0c0', '#0000c0', '#c000c0',
+		'#404040', '#800000', '#804000', '#808000', '#008000', '#008080', '#000080', '#800080',
+		'#000000', '#400000', '#804040', '#404000', '#004000', '#004040', '#000040', '#400040',
+	];
+
+	// colorEditor is a swatch that opens a palette, a native picker and the
+	// hex value, which also takes an alpha ("#rrggbbaa").
+	function colorEditor(current, send, textInput) {
+		const wrap = document.createElement('div');
+		wrap.className = 'color-editor';
+		const swatch = document.createElement('button');
+		swatch.className = 'color-swatch' + (current ? '' : ' unset');
+		swatch.style.background = cssColor(current) || '';
+		swatch.title = current ? current : 'Not set: the theme\'s color';
+		const hex = textInput('text', current, (v) => {
+			const t = v.trim();
+			if (/^#?[0-9a-f]{6}([0-9a-f]{2})?$/i.test(t)) send(t.startsWith('#') ? t.toLowerCase() : '#' + t.toLowerCase());
+		});
+		hex.placeholder = '#rrggbb';
+		hex.className = 'color-hex';
+		const native = document.createElement('input');
+		native.type = 'color';
+		native.value = current ? current.slice(0, 7) : '#000000';
+		native.title = 'Pick a color';
+		native.addEventListener('change', () => send(native.value.toLowerCase()));
+		swatch.addEventListener('click', () => {
+			const open = wrap.querySelector('.color-palette');
+			if (open) {
+				open.remove();
+				return;
+			}
+			const pal = document.createElement('div');
+			pal.className = 'color-palette';
+			for (const c of PALETTE) {
+				const cell = document.createElement('button');
+				cell.className = 'color-cell';
+				cell.style.background = c;
+				cell.title = c;
+				cell.dataset.color = c;
+				cell.addEventListener('click', () => send(c));
+				pal.appendChild(cell);
+			}
+			wrap.appendChild(pal);
+		});
+		wrap.appendChild(swatch);
+		wrap.appendChild(native);
+		wrap.appendChild(hex);
+		return wrap;
+	}
+
+	// FONT_FAMILIES are offered in the font editor's list; any other name can
+	// be typed. An empty family is the theme's.
+	const FONT_FAMILIES = ['', 'Sans', 'Serif', 'Monospace', 'Arial', 'Helvetica', 'Segoe UI', 'Roboto', 'Noto Sans', 'DejaVu Sans', 'Courier New', 'Times New Roman'];
+
+	// fontEditor edits a font's family, size and style together, writing
+	// them as one value - a Font is one SetFont call.
+	function fontEditor(current, send) {
+		const f = parseFont(current) || { family: '', size: 14, bold: false, italic: false };
+		const wrap = document.createElement('div');
+		wrap.className = 'font-editor';
+		const family = document.createElement('select');
+		for (const name of FONT_FAMILIES.includes(f.family) ? FONT_FAMILIES : FONT_FAMILIES.concat([f.family])) {
+			const o = document.createElement('option');
+			o.value = name;
+			o.textContent = name || '(theme)';
+			if (name === f.family) o.selected = true;
+			family.appendChild(o);
+		}
+		family.value = f.family;
+		const size = document.createElement('input');
+		size.type = 'number';
+		size.className = 'font-size';
+		size.min = '1';
+		size.value = String(f.size || 14);
+		const flag = (name, on) => {
+			const l = document.createElement('label');
+			l.className = 'flag-item';
+			const cb = document.createElement('input');
+			cb.type = 'checkbox';
+			cb.checked = on;
+			cb.dataset.style = name;
+			const t = document.createElement('span');
+			t.textContent = name;
+			l.appendChild(cb);
+			l.appendChild(t);
+			wrap.appendChild(l);
+			return cb;
+		};
+		wrap.appendChild(family);
+		wrap.appendChild(size);
+		const bold = flag('Bold', f.bold);
+		const italic = flag('Italic', f.italic);
+		const commit = () => {
+			const n = parseFloat(size.value);
+			if (!Number.isFinite(n) || n <= 0) return;
+			send([family.value, String(n)].concat(bold.checked ? ['Bold'] : [], italic.checked ? ['Italic'] : []).join(', '));
+		};
+		family.addEventListener('change', commit);
+		size.addEventListener('change', commit);
+		bold.addEventListener('change', commit);
+		italic.addEventListener('change', commit);
+		return wrap;
+	}
+
+	// appendCellGroup is where a control in a table sits: its column and
+	// row, and how far it spans. "Next free cell" is a plain AddControl, the
+	// cell AddControl's cursor gives it.
+	function appendCellGroup(panel, spec) {
+		const table = findControl(spec.parent);
+		const g = groupEl('Cell');
+		const cell = effectiveCell(spec) || { column: 0, row: 0, columnSpan: 1, rowSpan: 1 };
+		const auto = !spec.cell;
+		const autoRow = document.createElement('div');
+		autoRow.className = 'prop-row';
+		const autoLabel = document.createElement('label');
+		autoLabel.textContent = 'Next free cell';
+		const autoBox = document.createElement('input');
+		autoBox.type = 'checkbox';
+		autoBox.checked = auto;
+		autoBox.addEventListener('change', () => {
+			post({ type: 'apply', ops: [{ op: 'setCell', id: spec.id, cell: autoBox.checked ? undefined : { column: cell.column, row: cell.row } }] });
+		});
+		autoRow.appendChild(autoLabel);
+		autoRow.appendChild(autoBox);
+		g.appendChild(autoRow);
+		const cols = tracksOf(table, 'columns').length, rows = tracksOf(table, 'rows').length;
+		const fields = [
+			['Column', 'column', cell.column, 0, cols - 1],
+			['Row', 'row', cell.row, 0, rows - 1],
+			['ColumnSpan', 'columnSpan', cell.columnSpan || 1, 1, cols],
+			['RowSpan', 'rowSpan', cell.rowSpan || 1, 1, rows],
+		];
+		const inputs = {};
+		for (const [label, key, value, min, max] of fields) {
 			const row = document.createElement('div');
 			row.className = 'prop-row';
-			const label = document.createElement('label');
-			label.textContent = prop;
-			row.appendChild(label);
-
-			const current = (spec.props && spec.props[prop]) || '';
-			const kind = propKind(desc, prop);
-			const send = (value) => {
-				post({ type: 'apply', ops: [{ op: 'setProp', id: spec.id, prop, value }] });
-			};
-
-			if (kind === 'bool') {
-				const input = document.createElement('input');
-				input.type = 'checkbox';
-				input.checked = current === 'true';
-				input.addEventListener('change', () => send(input.checked ? 'true' : 'false'));
-				row.appendChild(input);
-			} else if (kind === 'enum') {
-				const select = document.createElement('select');
-				const values = (desc && desc.Enums && desc.Enums[prop]) || [];
-				// An unset enum shows a blank entry rather than silently
-				// claiming the first value is already in the source.
-				if (!current) {
-					const blank = document.createElement('option');
-					blank.value = '';
-					blank.textContent = '(default)';
-					select.appendChild(blank);
-				}
-				for (const v of values) {
-					const opt = document.createElement('option');
-					opt.value = v;
-					opt.textContent = v;
-					if (v === current) opt.selected = true;
-					select.appendChild(opt);
-				}
-				select.addEventListener('change', () => {
-					if (select.value) send(select.value);
-				});
-				row.appendChild(select);
-			} else if (kind === 'flags') {
-				// A flag set is a row of checkboxes; the wire value is the
-				// comma-joined list of the ticked names.
-				const values = (desc && desc.Enums && desc.Enums[prop]) || [];
-				const on = new Set(current ? current.split(',').map((v) => v.trim()) : []);
-				const box = document.createElement('div');
-				box.className = 'flag-set';
-				for (const v of values) {
-					const item = document.createElement('label');
-					item.className = 'flag-item';
-					const cb = document.createElement('input');
-					cb.type = 'checkbox';
-					cb.checked = on.has(v);
-					cb.addEventListener('change', () => {
-						if (cb.checked) on.add(v);
-						else on.delete(v);
-						send(values.filter((n) => on.has(n)).join(','));
-					});
-					const text = document.createElement('span');
-					// "AnchorTop" reads better as just "Top" in a row of four.
-					text.textContent = v.replace(/^[A-Z][a-z]+(?=[A-Z])/, '');
-					item.appendChild(cb);
-					item.appendChild(text);
-					box.appendChild(item);
-				}
-				row.appendChild(box);
-			} else if (kind === 'number') {
-				const input = document.createElement('input');
-				input.type = 'number';
-				input.value = current;
-				const commit = () => {
-					if (input.value.trim() !== '') send(input.value.trim());
+			row.dataset.prop = 'cell.' + key;
+			const l = document.createElement('label');
+			l.textContent = label;
+			const input = numberInput(value);
+			input.min = String(min);
+			input.max = String(max);
+			input.disabled = auto && (key === 'column' || key === 'row');
+			inputs[key] = input;
+			input.addEventListener('change', () => {
+				const next = {
+					column: parseInt(inputs.column.value, 10) || 0,
+					row: parseInt(inputs.row.value, 10) || 0,
+					columnSpan: Math.max(1, parseInt(inputs.columnSpan.value, 10) || 1),
+					rowSpan: Math.max(1, parseInt(inputs.rowSpan.value, 10) || 1),
 				};
-				input.addEventListener('change', commit);
-				input.addEventListener('keydown', (e) => {
-					if (e.key === 'Enter') input.blur();
-				});
-				row.appendChild(input);
-			} else {
-				const input = document.createElement('input');
-				input.type = 'text';
-				input.value = current;
-				const commit = () => send(input.value);
-				input.addEventListener('change', commit);
-				input.addEventListener('keydown', (e) => {
-					if (e.key === 'Enter') input.blur();
-				});
-				row.appendChild(input);
-			}
+				post({ type: 'apply', ops: [{ op: 'setCell', id: spec.id, cell: compactCell(next) }] });
+			});
+			input.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') input.blur();
+			});
+			row.appendChild(l);
+			row.appendChild(input);
 			g.appendChild(row);
 		}
 		panel.appendChild(g);
+	}
+
+	// appendTableGroup edits a table's columns and rows: each one's size type
+	// and size, added, removed and reordered - the Column and Row Styles
+	// dialog. Edits are sent as one setTable, which rewrites the counts in the
+	// constructor and every style call at once.
+	function appendTableGroup(panel, spec) {
+		const g = groupEl('Columns and rows');
+		if (spec.tableReadOnly) {
+			const note = document.createElement('div');
+			note.className = 'hint';
+			note.textContent = 'The column and row styles are built by code this designer cannot regenerate; edit them in the .go file.';
+			g.appendChild(note);
+			panel.appendChild(g);
+			return;
+		}
+		const lists = { columns: tracksOf(spec, 'columns').map((t) => Object.assign({}, t)), rows: tracksOf(spec, 'rows').map((t) => Object.assign({}, t)) };
+		const commit = () => {
+			post({ type: 'apply', ops: [{ op: 'setTable', id: spec.id, tableColumns: lists.columns, tableRows: lists.rows }] });
+		};
+		for (const which of ['columns', 'rows']) {
+			const head = document.createElement('div');
+			head.className = 'hint';
+			head.textContent = which === 'columns' ? 'Columns' : 'Rows';
+			g.appendChild(head);
+			lists[which].forEach((t, i) => {
+				const row = document.createElement('div');
+				row.className = 'coll-row track-row';
+				row.dataset.prop = `${which}.${i}`;
+				const n = document.createElement('span');
+				n.className = 'track-index';
+				n.textContent = String(i + 1);
+				const type = document.createElement('select');
+				for (const v of ['AutoSize', 'Absolute', 'Percent']) {
+					const o = document.createElement('option');
+					o.value = v;
+					o.textContent = v;
+					if (v === t.type) o.selected = true;
+					type.appendChild(o);
+				}
+				type.value = t.type;
+				const value = numberInput(t.value || 0);
+				value.disabled = t.type === 'AutoSize';
+				type.addEventListener('change', () => {
+					t.type = type.value;
+					if (t.type === 'AutoSize') delete t.value;
+					else t.value = Number(value.value) || (t.type === 'Percent' ? 50 : 100);
+					commit();
+				});
+				value.addEventListener('change', () => {
+					t.value = Math.max(0, Number(value.value) || 0);
+					commit();
+				});
+				row.appendChild(n);
+				row.appendChild(type);
+				row.appendChild(value);
+				row.appendChild(iconButton('↑', 'Move up', () => {
+					if (i === 0) return;
+					editTableMove(spec, which, i, i - 1);
+				}));
+				row.appendChild(iconButton('✕', 'Delete', () => editTableTrack(spec, which, i, 'delete')));
+				g.appendChild(row);
+			});
+			const add = document.createElement('button');
+			add.className = 'coll-add';
+			add.textContent = which === 'columns' ? '+ Column' : '+ Row';
+			add.addEventListener('click', () => editTableTrack(spec, which, lists[which].length, 'insert'));
+			g.appendChild(add);
+		}
+		panel.appendChild(g);
+	}
+
+	// editTableMove swaps two tracks of a table, the controls in them going
+	// along.
+	function editTableMove(table, which, from, to) {
+		const isCol = which === 'columns';
+		const tracks = tracksOf(table, which).map((t) => Object.assign({}, t));
+		[tracks[from], tracks[to]] = [tracks[to], tracks[from]];
+		const ops = [];
+		for (const c of canvasControls()) {
+			if (c.parent !== table.id || c.parentSlot) continue;
+			const cell = effectiveCell(c);
+			if (!cell) continue;
+			const at = isCol ? cell.column : cell.row;
+			const next = at === from ? to : at === to ? from : at;
+			if (next === at && c.cell) continue;
+			ops.push({ op: 'setCell', id: c.id, cell: compactCell(isCol ? Object.assign({}, cell, { column: next }) : Object.assign({}, cell, { row: next })) });
+		}
+		ops.push({ op: 'setTable', id: table.id, tableColumns: isCol ? tracks : tracksOf(table, 'columns'), tableRows: isCol ? tracksOf(table, 'rows') : tracks });
+		post({ type: 'apply', ops });
 	}
 
 	// appendFormGroup is what the properties panel shows when nothing is
@@ -3430,6 +4676,10 @@
 			const current = (spec.events && spec.events[eventName]) || '';
 			const row = document.createElement('div');
 			row.className = 'event-row' + (current ? ' wired' : '');
+			row.dataset.prop = 'event.' + eventName;
+			const help = desc && desc.Descriptions && desc.Descriptions[eventName];
+			if (help) row.title = help;
+			row.addEventListener('mouseenter', () => showHelp(eventName, help));
 
 			const label = document.createElement('span');
 			label.className = 'event-name';
@@ -3482,6 +4732,532 @@
 		btn.title = 'Del — undo with Ctrl+Z';
 		btn.addEventListener('click', deleteSelection);
 		panel.appendChild(btn);
+	}
+
+	// ---------------------------------------------------------------------
+	// Context menu
+	// ---------------------------------------------------------------------
+	//
+	// The right-click menu of the canvas, the tray and the outline, as the
+	// Visual Studio designer's: the clipboard, the z-order, the way up to the
+	// container, and - on a table - inserting and deleting its columns and
+	// rows where the mouse is.
+
+	// closePopups closes the context menu and the smart tag panel, and says
+	// whether there was one, so Escape closes a popup before it changes the
+	// selection.
+	function closePopups() {
+		let closed = false;
+		for (const el of document.querySelectorAll('.ctx-menu')) {
+			el.remove();
+			closed = true;
+		}
+		if (smartOpen) {
+			smartOpen = null;
+			for (const el of document.querySelectorAll('.smart-panel')) el.remove();
+			closed = true;
+		}
+		return closed;
+	}
+
+	// The menu is closed by any press outside it. Bound once: the window
+	// outlives every render.
+	window.addEventListener('mousedown', (e) => {
+		const t = e.target;
+		if (t && t.closest && (t.closest('.ctx-menu') || t.closest('.smart-panel') || t.closest('.smart-glyph'))) return;
+		closePopups();
+	});
+
+	// showContextMenu opens the menu for a control (spec), or the form when
+	// spec is null. cell is the table cell under the mouse, when there is a
+	// table there.
+	function showContextMenu(e, spec, cell) {
+		e.preventDefault();
+		e.stopPropagation();
+		closePopups();
+		if (spec && !selectedIds.has(spec.id)) {
+			setSelection(spec.id, false);
+			updateSelectionClasses();
+			renderProperties();
+			renderOutline();
+		} else if (!spec && selectedIds.size) {
+			selectForm();
+		}
+		const menu = document.createElement('div');
+		menu.className = 'ctx-menu';
+		const item = (label, keys, fn, enabled) => {
+			const row = document.createElement('div');
+			row.className = 'ctx-item' + (enabled === false ? ' disabled' : '');
+			const l = document.createElement('span');
+			l.className = 'ctx-label';
+			l.textContent = label;
+			const k = document.createElement('span');
+			k.className = 'ctx-keys';
+			k.textContent = keys || '';
+			row.appendChild(l);
+			row.appendChild(k);
+			if (enabled !== false) {
+				row.addEventListener('mousedown', (ev) => {
+					ev.preventDefault();
+					ev.stopPropagation();
+					closePopups();
+					fn();
+				});
+			}
+			menu.appendChild(row);
+			return row;
+		};
+		const sep = () => {
+			const d = document.createElement('div');
+			d.className = 'ctx-sep';
+			menu.appendChild(d);
+		};
+		const has = selectedSpecs().some((c) => c.supported);
+		const canvasSel = selectedSpecs().some((c) => c.supported && !isComponent(c));
+
+		item('View Code', 'F7', () => post({ type: 'viewCode' }));
+		if (!spec) item('Set as Startup Form', '', () => post({ type: 'setStartup' }));
+		sep();
+		item('Cut', 'Ctrl+X', cutSelection, has);
+		item('Copy', 'Ctrl+C', copySelection, has);
+		item('Paste', 'Ctrl+V', () => post({ type: 'paste' }));
+		item('Duplicate', 'Ctrl+D', duplicateSelection, has);
+		item('Delete', 'Del', deleteSelection, has);
+		if (spec && !isComponent(spec)) {
+			sep();
+			item('Bring to Front', '', () => zorder(true), canvasSel);
+			item('Send to Back', '', () => zorder(false), canvasSel);
+		}
+		if (spec && spec.parent && findControl(spec.parent)) {
+			item(`Select ${spec.parent}`, 'Esc', selectParent);
+		}
+		const table = spec && spec.type === 'TableLayoutPanel' ? spec : spec && spec.parent && !spec.parentSlot && (findControl(spec.parent) || {}).type === 'TableLayoutPanel' ? findControl(spec.parent) : null;
+		if (table && !table.tableReadOnly) {
+			const at = cell || (spec !== table ? effectiveCell(spec) : null) || { column: 0, row: 0 };
+			sep();
+			item(`Insert Column Before ${at.column + 1}`, '', () => editTableTrack(table, 'columns', at.column, 'insert'));
+			item(`Insert Column After ${at.column + 1}`, '', () => editTableTrack(table, 'columns', at.column + 1, 'insert'));
+			item(`Delete Column ${at.column + 1}`, '', () => editTableTrack(table, 'columns', at.column, 'delete'), tracksOf(table, 'columns').length > 1);
+			item(`Insert Row Above ${at.row + 1}`, '', () => editTableTrack(table, 'rows', at.row, 'insert'));
+			item(`Insert Row Below ${at.row + 1}`, '', () => editTableTrack(table, 'rows', at.row + 1, 'insert'));
+			item(`Delete Row ${at.row + 1}`, '', () => editTableTrack(table, 'rows', at.row, 'delete'), tracksOf(table, 'rows').length > 1);
+		}
+		sep();
+		item((locked ? '✓ ' : '') + 'Lock Controls', '', () => setLocked(!locked));
+		item((tabOrderMode ? '✓ ' : '') + 'Tab Order', '', () => setTabOrderMode(!tabOrderMode));
+		sep();
+		item('Properties', '', () => showTab('properties'));
+
+		menu.style.left = (e.clientX || 0) + 'px';
+		menu.style.top = (e.clientY || 0) + 'px';
+		document.body.appendChild(menu);
+		// Keep it on screen: a right-click near the bottom of the canvas
+		// would otherwise open a menu half out of sight.
+		const r = menu.getBoundingClientRect();
+		const vw = (globalThis.innerWidth || 0), vh = (globalThis.innerHeight || 0);
+		if (vw && r.right > vw) menu.style.left = Math.max(0, vw - r.width - 4) + 'px';
+		if (vh && r.bottom > vh) menu.style.top = Math.max(0, vh - r.height - 4) + 'px';
+	}
+
+	// editTableTrack inserts or deletes one column or row of a table, the
+	// controls going along: those past the change move with it, and a span
+	// across it grows or shrinks. A column or row with a control in it is
+	// not deleted - the controls there would have nowhere to be.
+	function editTableTrack(table, which, index, action) {
+		const isCol = which === 'columns';
+		const tracks = tracksOf(table, which).map((t) => Object.assign({}, t));
+		const kids = canvasControls().filter((c) => c.parent === table.id && !c.parentSlot);
+		const cells = kids.map((c) => ({ spec: c, cell: effectiveCell(c) }));
+		const at = (c) => (isCol ? c.column : c.row);
+		const span = (c) => (isCol ? c.columnSpan : c.rowSpan) || 1;
+
+		if (action === 'delete') {
+			const inIt = cells.find(({ cell }) => cell && at(cell) === index && span(cell) === 1);
+			if (inIt) {
+				showToast(`${inIt.spec.id} is in ${isCol ? 'column' : 'row'} ${index + 1}; move or delete it first`, 'error');
+				return;
+			}
+		}
+		const moved = [];
+		for (const { spec, cell } of cells) {
+			if (!cell) continue;
+			const c = { column: cell.column, row: cell.row, columnSpan: cell.columnSpan, rowSpan: cell.rowSpan };
+			let changed = false;
+			const key = isCol ? 'column' : 'row', spanKey = isCol ? 'columnSpan' : 'rowSpan';
+			if (action === 'insert') {
+				if (c[key] >= index) {
+					c[key]++;
+					changed = true;
+				} else if (c[key] + (c[spanKey] || 1) > index) {
+					c[spanKey] = (c[spanKey] || 1) + 1;
+					changed = true;
+				}
+			} else if (c[key] > index) {
+				c[key]--;
+				changed = true;
+			} else if (c[key] + (c[spanKey] || 1) > index) {
+				c[spanKey] = Math.max(1, (c[spanKey] || 1) - 1);
+				changed = true;
+			}
+			// Every child is written with its cell, so auto-placed ones do not
+			// drift when the count of columns changes under them.
+			if (changed || !spec.cell) moved.push({ id: spec.id, cell: compactCell(c) });
+		}
+		if (action === 'insert') tracks.splice(index, 0, { type: 'AutoSize' });
+		else tracks.splice(index, 1);
+		const table2 = {
+			op: 'setTable',
+			id: table.id,
+			tableColumns: isCol ? tracks : tracksOf(table, 'columns'),
+			tableRows: isCol ? tracksOf(table, 'rows') : tracks,
+		};
+		const cellOps = moved.map((m) => ({ op: 'setCell', id: m.id, cell: m.cell }));
+		// Growing: the table first, so the cells moved into the new track
+		// exist. Shrinking: the cells first, so nothing is left outside it.
+		const ops = action === 'insert' ? [table2].concat(cellOps) : cellOps.concat([table2]);
+		post({ type: 'apply', ops });
+	}
+
+	function compactCell(c) {
+		const out = { column: c.column, row: c.row };
+		if (c.columnSpan > 1) out.columnSpan = c.columnSpan;
+		if (c.rowSpan > 1) out.rowSpan = c.rowSpan;
+		return out;
+	}
+
+	// ---------------------------------------------------------------------
+	// Smart tags
+	// ---------------------------------------------------------------------
+	//
+	// The ◂ at a selected control's top right corner, and its Tasks panel:
+	// the handful of things one does to that kind of control most, without
+	// looking for them in the property list.
+
+	function drawSmartTag() {
+		for (const g of document.querySelectorAll('.smart-glyph')) g.remove();
+		if (selectedIds.size !== 1 || locked || tabOrderMode) return;
+		const spec = findControl(selectedId);
+		if (!spec || !spec.supported || isComponent(spec)) return;
+		const el = rendered.get(spec.id);
+		if (!el || !smartActions(spec).length) return;
+		const glyph = document.createElement('div');
+		glyph.className = 'smart-glyph' + (smartOpen === spec.id ? ' on' : '');
+		glyph.textContent = '◂';
+		glyph.title = `${spec.type} Tasks`;
+		glyph.addEventListener('mousedown', (e) => {
+			e.stopPropagation();
+			e.preventDefault();
+			if (smartOpen === spec.id) {
+				closePopups();
+				return;
+			}
+			closePopups();
+			smartOpen = spec.id;
+			openSmartPanel(spec.id, glyph);
+		});
+		el.appendChild(glyph);
+	}
+
+	// smartActions lists a control's tasks: {label, run} for a command,
+	// {label, prop} for a property edited in place.
+	function smartActions(spec) {
+		const out = [];
+		const docked = propOr(spec, 'dock', 'DockNone') === 'DockFill';
+		const desc = catalog[spec.type] || {};
+		if (desc.Setters && Object.values(desc.Setters).includes('dock')) {
+			out.push({
+				label: docked ? 'Undock in Parent Container' : 'Dock in Parent Container',
+				run: () => post({ type: 'apply', ops: [{ op: 'setProp', id: spec.id, prop: 'dock', value: docked ? 'DockNone' : 'DockFill' }] }),
+			});
+		}
+		const cd = desc.Collection;
+		if (cd && cd.ItemSlot && !spec.collectionReadOnly) {
+			const one = cd.Label.replace(/s$/, '');
+			out.push({
+				label: `Add ${one}`,
+				run: () => {
+					const items = collectionOf(spec).concat([{ text: `${one} ${collectionOf(spec).length + 1}` }]);
+					pageChoice[spec.id] = items.length - 1;
+					post({ type: 'apply', ops: [{ op: 'setCollection', id: spec.id, collection: items }] });
+				},
+			});
+			if (collectionOf(spec).length > 1) {
+				out.push({
+					label: `Remove ${one}`,
+					run: () => {
+						const shown = Math.min(pageChoice[spec.id] || 0, collectionOf(spec).length - 1);
+						const items = collectionOf(spec).filter((_, i) => i !== shown);
+						pageChoice[spec.id] = Math.max(0, shown - 1);
+						// The tool refuses to drop a page that still has controls
+						// on it, and says which.
+						post({ type: 'apply', ops: [{ op: 'setCollection', id: spec.id, collection: items }] });
+					},
+				});
+			}
+		}
+		if (spec.type === 'DataGridView') {
+			out.push({
+				label: 'Add Column',
+				run: () => {
+					const cols = (spec.columns && spec.columns.length ? spec.columns : (spec.items || []).map((t) => ({ title: t }))).slice();
+					cols.push({ title: `Column ${cols.length + 1}` });
+					post({ type: 'apply', ops: [{ op: 'setColumns', id: spec.id, columns: cols }] });
+				},
+			});
+			out.push({ label: 'Edit Columns…', run: () => revealGroup('Columns') });
+		}
+		if (['ComboBox', 'ListBox', 'CheckedListBox', 'DomainUpDown'].includes(spec.type)) {
+			out.push({ label: 'Edit Items…', run: () => revealGroup('Items') });
+		}
+		if (spec.type === 'ListView') out.push({ label: 'Edit Columns…', run: () => revealGroup('Columns') });
+		if (cd && !cd.ItemSlot) out.push({ label: `Edit ${cd.Label}…`, run: () => revealGroup(cd.Label) });
+		if (spec.type === 'TableLayoutPanel' && !spec.tableReadOnly) {
+			out.push({ label: 'Add Column', run: () => editTableTrack(spec, 'columns', tracksOf(spec, 'columns').length, 'insert') });
+			out.push({ label: 'Add Row', run: () => editTableTrack(spec, 'rows', tracksOf(spec, 'rows').length, 'insert') });
+			out.push({ label: 'Edit Rows and Columns…', run: () => revealGroup('Columns and rows') });
+		}
+		if (spec.type === 'FlowLayoutPanel') {
+			out.push({ label: 'Flow direction', prop: 'flowDirection' });
+			out.push({ label: 'Wrap contents', prop: 'wrapContents' });
+		}
+		return out;
+	}
+
+	function openSmartPanel(id, glyph) {
+		for (const el of document.querySelectorAll('.smart-panel')) el.remove();
+		const spec = findControl(id);
+		if (!spec) return;
+		const desc = catalog[spec.type];
+		const panel = document.createElement('div');
+		panel.className = 'smart-panel';
+		const title = document.createElement('div');
+		title.className = 'smart-title';
+		title.textContent = `${spec.type} Tasks`;
+		panel.appendChild(title);
+		for (const a of smartActions(spec)) {
+			const line = document.createElement('div');
+			line.className = 'smart-line';
+			if (a.run) {
+				const link = document.createElement('button');
+				link.className = 'smart-link';
+				link.textContent = a.label;
+				link.addEventListener('click', () => {
+					closePopups();
+					a.run();
+				});
+				line.appendChild(link);
+			} else {
+				const label = document.createElement('span');
+				label.textContent = a.label;
+				line.appendChild(label);
+				line.appendChild(propEditor(spec, desc, a.prop));
+			}
+			panel.appendChild(line);
+		}
+		const r = glyph.getBoundingClientRect();
+		panel.style.left = r.right + 4 + 'px';
+		panel.style.top = r.top + 'px';
+		document.body.appendChild(panel);
+	}
+
+	// revealGroup brings one group of the properties panel into view - what
+	// "Edit Columns…" and the like do.
+	function revealGroup(title) {
+		showTab('properties');
+		const panel = $('properties-panel');
+		const g = panel ? [...panel.querySelectorAll('.prop-group')].find((x) => x.dataset.group === title) : null;
+		if (g) {
+			g.classList.add('flash');
+			if (g.scrollIntoView) g.scrollIntoView({ block: 'start' });
+			setTimeout(() => g.classList.remove('flash'), 900);
+		}
+	}
+
+	// ---------------------------------------------------------------------
+	// Document Outline
+	// ---------------------------------------------------------------------
+	//
+	// The form's controls as a tree, as Visual Studio's Document Outline
+	// shows them: each container's controls front-most first, a split or
+	// paged container's halves and pages as nodes of their own, the tray at
+	// the end. A click selects; a drag onto a container puts the control in
+	// it, and a drag above or below a sibling puts it there in the z-order.
+
+	let outlineDrag = null;
+
+	function renderOutline() {
+		const host = $('outline-panel');
+		if (!host || !model || !catalog) return;
+		host.innerHTML = '';
+		const kidsOf = (key) => canvasControls().filter((c) => parentKey(c.parent, c.parentSlot) === key).reverse();
+
+		const node = (label, opts, depth) => {
+			const row = document.createElement('div');
+			row.className = 'ol-node' + (opts.id !== undefined && selectedIds.has(opts.id) ? ' selected' : '') + (opts.slot ? ' ol-slot' : '');
+			row.style.paddingLeft = 4 + depth * 14 + 'px';
+			if (opts.id !== undefined) row.dataset.id = opts.id;
+			if (opts.key !== undefined) row.dataset.key = opts.key;
+			const fold = document.createElement('span');
+			fold.className = 'ol-fold';
+			const foldKey = opts.key !== undefined ? opts.key : opts.id;
+			fold.textContent = opts.hasKids ? (outlineCollapsed.has(foldKey) ? '▸' : '▾') : '';
+			fold.addEventListener('mousedown', (e) => {
+				e.stopPropagation();
+				if (outlineCollapsed.has(foldKey)) outlineCollapsed.delete(foldKey);
+				else outlineCollapsed.add(foldKey);
+				renderOutline();
+			});
+			const text = document.createElement('span');
+			text.className = 'ol-text';
+			text.textContent = label;
+			row.appendChild(fold);
+			row.appendChild(text);
+			if (opts.type) {
+				const t = document.createElement('span');
+				t.className = 'ol-type';
+				t.textContent = opts.type;
+				row.appendChild(t);
+			}
+			if (opts.id !== undefined) {
+				row.addEventListener('mousedown', (e) => {
+					if (e.button === 2) return;
+					if (opts.id === '') {
+						selectForm();
+						renderOutline();
+						return;
+					}
+					setSelection(opts.id, e.ctrlKey || e.metaKey || e.shiftKey);
+					updateSelectionClasses();
+					renderProperties();
+					renderOutline();
+				});
+				if (opts.id) {
+					const spec = findControl(opts.id);
+					row.addEventListener('contextmenu', (e) => showContextMenu(e, spec, null));
+					row.draggable = !isComponent(spec);
+					row.addEventListener('dragstart', (e) => {
+						outlineDrag = opts.id;
+						if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+					});
+				}
+			}
+			row.addEventListener('dragover', (e) => {
+				if (!outlineDrag) return;
+				const zone = outlineZone(row, e);
+				if (!zone) return;
+				e.preventDefault();
+				clearOutlineMarks();
+				row.classList.add('ol-' + zone);
+			});
+			row.addEventListener('dragleave', () => row.classList.remove('ol-before', 'ol-after', 'ol-into'));
+			row.addEventListener('drop', (e) => {
+				e.preventDefault();
+				const zone = outlineZone(row, e);
+				clearOutlineMarks();
+				const moving = outlineDrag;
+				outlineDrag = null;
+				if (moving && zone) outlineDrop(moving, row, zone);
+			});
+			host.appendChild(row);
+			return row;
+		};
+
+		const walk = (key, depth) => {
+			if (outlineCollapsed.has(key)) return;
+			for (const c of kidsOf(key)) {
+				const slots = slotsFor(c);
+				const hasKids = slots.length > 0 || kidsOf(c.id).length > 0;
+				node(c.id, { id: c.id, key: slots.length ? undefined : c.id, type: c.type, hasKids }, depth);
+				if (outlineCollapsed.has(c.id)) continue;
+				if (slots.length) {
+					slots.forEach((slot, i) => {
+						const k = parentKey(c.id, slot);
+						const page = collectionOf(c)[i];
+						const label = (catalog[c.type].Slots || []).length ? slot : `${slot} · ${page ? page.text : ''}`;
+						node(label, { key: k, slot: true, hasKids: kidsOf(k).length > 0 }, depth + 1);
+						walk(k, depth + 2);
+					});
+				} else {
+					walk(c.id, depth + 1);
+				}
+			}
+		};
+		node(model.receiverType, { id: '', key: '', type: 'Form', hasKids: canvasControls().length > 0 }, 0);
+		walk('', 1);
+		const tray = trayControls();
+		if (tray.length) {
+			const t = document.createElement('div');
+			t.className = 'ol-heading';
+			t.textContent = 'Components';
+			host.appendChild(t);
+			for (const c of tray) node(c.id, { id: c.id, type: c.type, hasKids: false }, 1);
+		}
+	}
+
+	function clearOutlineMarks() {
+		for (const el of document.querySelectorAll('.ol-node')) el.classList.remove('ol-before', 'ol-after', 'ol-into');
+	}
+
+	// outlineZone is where a drop on a row goes: into it (a container, or a
+	// half or page of one), or before or after it among its siblings.
+	function outlineZone(row, e) {
+		const id = row.dataset.id;
+		const key = row.dataset.key;
+		const moving = outlineDrag;
+		if (!moving) return null;
+		const into = key !== undefined && (key === '' || acceptsKey(key)) && !keyInside(key, moving);
+		if (id === undefined || id === '') return into ? 'into' : null;
+		if (id === moving || isInsideAny(id, new Set([moving]))) return null;
+		const target = findControl(id);
+		if (!target || isComponent(target)) return null;
+		const r = row.getBoundingClientRect();
+		const y = (e.clientY || 0) - r.top;
+		if (into && y > r.height / 4 && y < (r.height * 3) / 4) return 'into';
+		return y <= r.height / 2 ? 'before' : 'after';
+	}
+
+	// acceptsKey reports whether a parent key is somewhere controls can go.
+	function acceptsKey(key) {
+		const [parent, slot] = splitParentKey(key);
+		if (!parent) return true;
+		const spec = findControl(parent);
+		if (!spec) return false;
+		if (slot) return slotsFor(spec).includes(slot);
+		return !!(catalog[spec.type] && catalog[spec.type].IsContainer);
+	}
+
+	function keyInside(key, id) {
+		const [parent] = splitParentKey(key);
+		return parent === id || (parent && isInsideAny(parent, new Set([id])));
+	}
+
+	function outlineDrop(id, row, zone) {
+		const spec = findControl(id);
+		if (!spec) return;
+		const ops = [];
+		let key, order;
+		if (zone === 'into') {
+			key = row.dataset.key;
+			const [parent, slot] = splitParentKey(key);
+			if (parentKey(spec.parent, spec.parentSlot) === key) return;
+			ops.push({ op: 'setParent', id, parent, parentSlot: slot });
+			ops.push({ op: 'setBounds', id, x: 8, y: 8, w: spec.w, h: spec.h });
+		} else {
+			const target = findControl(row.dataset.id);
+			key = parentKey(target.parent, target.parentSlot);
+			if (parentKey(spec.parent, spec.parentSlot) !== key) {
+				ops.push({ op: 'setParent', id, parent: target.parent || '', parentSlot: target.parentSlot || '' });
+				ops.push({ op: 'setBounds', id, x: 8, y: 8, w: spec.w, h: spec.h });
+			}
+			// The outline lists front first, so "before" in it is later in
+			// the add order.
+			order = siblingsOf(target).map((c) => c.id).filter((x) => x !== id);
+			const i = order.indexOf(target.id);
+			order.splice(zone === 'before' ? i + 1 : i, 0, id);
+			const [parent, slot] = splitParentKey(key);
+			ops.push({ op: 'reorder', id: parent, parentSlot: slot, order });
+		}
+		post({ type: 'apply', ops });
 	}
 
 	// ---------------------------------------------------------------------

@@ -120,3 +120,16 @@ func TestResetPropRefusesAConstructorArgument(t *testing.T) {
 		t.Fatal("reset an interval the constructor needs")
 	}
 }
+
+// A file whose other blocks cannot be moved - a Timer's wiring written
+// further down - still lets one container's children trade places.
+func TestReorderWorksBesideBlocksThatCannotMove(t *testing.T) {
+	src := strings.Replace(threeButtons, "\tmf.btnA = goforms.NewButton(\"A\")", "\tmf.tmr = goforms.NewTimer(1000)\n\n\tmf.btnA = goforms.NewButton(\"A\")", 1)
+	src = strings.Replace(src, "\tbtnC *goforms.Button\n", "\tbtnC *goforms.Button\n\ttmr  *goforms.Timer\n", 1)
+	src = strings.Replace(src, "\tmf.AddControl(mf.btnC)\n}", "\tmf.AddControl(mf.btnC)\n\n\tmf.tmr.Tick.Handle(mf.tick)\n}", 1)
+	path := writeFixture(t, src)
+	model, _ := mustApply(t, path, Op{Op: "reorder", ID: "", Order: []string{"btnC", "btnA", "pnl"}})
+	if got := idsIn(model, ""); got != "tmr,btnC,btnA,pnl" {
+		t.Fatalf("form children = %s", got)
+	}
+}
