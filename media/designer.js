@@ -654,6 +654,60 @@
 		tab.addEventListener('click', () => showTab(tab.dataset.tab));
 	});
 
+	// The side panel's left edge is a splitter, as the Visual Studio
+	// property window's is: the column and menu item editors want more room
+	// than a property grid, and how much is the user's call. The width is
+	// kept in the webview's state, so it survives the editor being hidden
+	// and shown again.
+	const SIDE_MIN = 220;
+	function sideMax() { return Math.max(SIDE_MIN, Math.round(window.innerWidth * 0.6)); }
+	function setSideWidth(w) {
+		const panel = $('side-panel');
+		if (!panel) return;
+		const clamped = Math.min(sideMax(), Math.max(SIDE_MIN, Math.round(w)));
+		panel.style.flexBasis = clamped + 'px';
+		panel.style.maxWidth = clamped + 'px';
+		return clamped;
+	}
+	(function wireSideResizer() {
+		const panel = $('side-panel');
+		const host = panel && panel.parentElement;
+		if (!host || $('side-resizer')) return;
+		const grip = document.createElement('div');
+		grip.id = 'side-resizer';
+		grip.title = 'Drag to resize the panel; double-click to reset it';
+		host.insertBefore(grip, panel);
+		const saved = (vscode.getState && vscode.getState()) || {};
+		if (saved.sideWidth) setSideWidth(saved.sideWidth);
+		const remember = (w) => {
+			if (!vscode.setState) return;
+			const st = (vscode.getState && vscode.getState()) || {};
+			vscode.setState(Object.assign({}, st, { sideWidth: w }));
+		};
+		grip.addEventListener('pointerdown', (e) => {
+			e.preventDefault();
+			grip.setPointerCapture(e.pointerId);
+			grip.classList.add('dragging');
+			const startX = e.clientX;
+			const startW = panel.getBoundingClientRect().width;
+			let last = startW;
+			const move = (ev) => { last = setSideWidth(startW + (startX - ev.clientX)) || last; };
+			const up = () => {
+				grip.classList.remove('dragging');
+				grip.removeEventListener('pointermove', move);
+				grip.removeEventListener('pointerup', up);
+				remember(last);
+			};
+			grip.addEventListener('pointermove', move);
+			grip.addEventListener('pointerup', up);
+		});
+		grip.addEventListener('dblclick', () => {
+			panel.style.flexBasis = '';
+			panel.style.maxWidth = '';
+			remember(0);
+		});
+	})();
+
 	function renderParseError() {
 		$('controls-panel').innerHTML = '';
 		$('properties-panel').innerHTML = '';
