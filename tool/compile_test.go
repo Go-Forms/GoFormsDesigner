@@ -141,6 +141,13 @@ func (mf *MainForm) initializeComponent() {
 		ops = append(ops, special...)
 	}
 	ops = append(ops, Op{Op: "setProp", Prop: "icon", Value: "resources/dot.png"})
+	// Every column setting the designer writes.
+	ops = append(ops, Op{Op: "setColumns", ID: "cDataGridView", Columns: []GridColumnSpec{
+		{Title: "ID", Width: 60, ReadOnly: true, Hidden: true},
+		{Title: "Name", SizeMode: "SizeFill", DataPropertyName: "Name", Align: "AlignCenter"},
+		{Title: "Go", Kind: "Button", ButtonText: "Open", SizeMode: "SizeToContent"},
+		{Title: "On", Kind: "CheckBox", Align: "AlignRight"},
+	}})
 	ops = append(ops,
 		Op{Op: "setTable", ID: "cTableLayoutPanel",
 			TableColumns: []TrackSpec{{Type: "Absolute", Value: 40}, {Type: "Percent", Value: 100}},

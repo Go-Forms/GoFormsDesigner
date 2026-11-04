@@ -49,35 +49,52 @@
 		var mode = opts.columnsMode || 'SizeFixed';
 		var scrollBars = opts.scrollBars || 'ScrollBarsBoth';
 		var measure = opts.measure;
+		// A column's own sizing (SetColumnSizeMode, SetColumnWidth) wins over
+		// the grid-wide mode, as it does at runtime.
+		var modes = opts.modes || [];
+		var fixed = opts.fixedWidths || [];
 
 		var avail = opts.width;
 		if (canScrollV(scrollBars)) {
 			avail -= SCROLLBAR;
 		}
 
-		var widths;
-		if (mode === 'SizeToContent') {
-			widths = cols.map(function (title, i) {
-				var w = measure(title, true) + PAD * 4;
+		var widths = [];
+		var fixedTotal = 0;
+		var fillCount = 0;
+		cols.forEach(function (title, i) {
+			var m = modes[i] || mode;
+			var w;
+			if (m === 'SizeToContent') {
+				w = measure(title, true) + PAD * 4;
 				for (var r = 0; r < rows.length; r++) {
 					if (i < rows[r].length) {
 						w = Math.max(w, measure(rows[r][i], false) + PAD * 4);
 					}
 				}
-				return Math.max(w, MIN_COL_W);
-			});
-		} else if (mode === 'SizeFill') {
-			// Every column carries the same weight here: per-column FillWeight
-			// isn't expressible in the designer's source model, only the
-			// grid-wide SetAutoSizeColumnsMode is.
-			var slack = Math.max(0, avail - cols.length * MIN_COL_W);
-			widths = cols.map(function () {
-				return Math.max(MIN_COL_W, MIN_COL_W + slack / cols.length);
-			});
-		} else {
-			widths = cols.map(function () {
-				return DEFAULT_COL_W;
-			});
+				w = Math.max(w, MIN_COL_W);
+				fixedTotal += w;
+			} else if (m === 'SizeFill') {
+				w = MIN_COL_W;
+				fillCount++;
+			} else {
+				w = Math.max(MIN_COL_W, fixed[i] > 0 ? fixed[i] : DEFAULT_COL_W);
+				fixedTotal += w;
+			}
+			widths.push(w);
+		});
+
+		// Fill columns divide whatever the other columns left behind, each
+		// with the same weight: FillWeight is not in the designer's model.
+		if (fillCount > 0) {
+			var slack = avail - fixedTotal - fillCount * MIN_COL_W;
+			if (slack > 0) {
+				cols.forEach(function (_, i) {
+					if ((modes[i] || mode) === 'SizeFill') {
+						widths[i] = MIN_COL_W + slack / fillCount;
+					}
+				});
+			}
 		}
 
 		// With horizontal scrolling off, squeeze to fit - never below the

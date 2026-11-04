@@ -51,6 +51,17 @@ type GridColumnSpec struct {
 	ButtonText string `json:"buttonText,omitempty"`
 	// DataPropertyName is the field of a bound record the column shows.
 	DataPropertyName string `json:"dataPropertyName,omitempty"`
+	// Width is a fixed width in pixels (SetColumnWidth), 0 for the default.
+	Width float64 `json:"width,omitempty"`
+	// SizeMode is the column's own sizing (SetColumnSizeMode), the SizeMode
+	// constant's name: "SizeFixed", "SizeToContent" or "SizeFill"; empty
+	// follows the grid's.
+	SizeMode string `json:"sizeMode,omitempty"`
+	// Align is "AlignLeft", "AlignCenter" or "AlignRight" (SetColumnAlign);
+	// empty is left.
+	Align string `json:"align,omitempty"`
+	// ReadOnly keeps the column's cells from being edited (SetColumnReadOnly).
+	ReadOnly bool `json:"readOnly,omitempty"`
 }
 
 // CellSpec is where a control sits in a TableLayoutPanel: its column and

@@ -67,6 +67,12 @@ columns can be made from a struct of the project. A picture for a PictureBox
 or the form's icon is copied into the form's folder and embedded with
 go:embed. ✕ beside an event unwires it.
 
+**A DataGridView designed column by column.** Click a column's header on the
+canvas and the panel edits that column - caption, type, the field it shows,
+width, sizing, alignment, read-only. Columns can be made from a struct of the
+project, and the grid can let the user add records in a row for new ones and
+delete them with Delete.
+
 **Shows the form as a tree.** The Outline tab lists the controls front-most
 first, containers with what is inside them; drag a control onto a container to
 move it there, or above or below another to change the z-order.

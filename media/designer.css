@@ -2433,3 +2433,36 @@ body {
 	font-size: 12px;
 	padding: 2px 4px;
 }
+
+/* DataGridView: the column picked by its header, per-column alignment, a
+   read-only column, and the row for new records. */
+.cc-grid-cell.cc-col-picked {
+	background: color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 18%, transparent);
+}
+
+.cc-grid-headcell.cc-col-picked {
+	box-shadow: inset 0 -2px 0 var(--vscode-focusBorder, #007fd4);
+}
+
+.cc-grid-headcell {
+	cursor: pointer;
+}
+
+.cc-grid-cell.cc-align-right {
+	text-align: right;
+	justify-content: flex-end;
+}
+
+.cc-grid-cell.cc-align-center {
+	text-align: center;
+	justify-content: center;
+}
+
+.cc-grid-cell.cc-col-readonly {
+	opacity: 0.7;
+}
+
+.cc-grid-newrow .cc-grid-cell {
+	opacity: 0.6;
+	font-style: italic;
+}

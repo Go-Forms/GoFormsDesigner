@@ -65,6 +65,9 @@
 	const pageChoice = {};
 	// smartOpen is the control whose Tasks panel (its smart tag) is open.
 	let smartOpen = null;
+	// selectedColumn is the DataGridView column picked by clicking its header
+	// on the canvas: {id, index}, or null. The panel then edits that column.
+	let selectedColumn = null;
 	// resourceBase is where the webview can load the form's folder from, for
 	// drawing its embedded pictures (see designerEditorProvider.ts).
 	let resourceBase = '';
@@ -2070,7 +2073,7 @@
 		);
 	}
 
-	function gridComputeWidths(cols, rows, spec) {
+	function gridComputeWidths(cols, rows, spec, drawn) {
 		const scrollBars = propOr(spec, 'scrollBars', 'ScrollBarsBoth');
 		return {
 			widths: GL.computeWidths({
@@ -2078,6 +2081,9 @@
 				rows,
 				width: spec.w,
 				columnsMode: propOr(spec, 'columnsMode', 'SizeFixed'),
+				// A column's own width and mode win over the grid's.
+				modes: (drawn || []).map((c) => c.sizeMode || ''),
+				fixedWidths: (drawn || []).map((c) => c.width || 0),
 				scrollBars,
 				measure: measureGridText,
 			}),
@@ -2105,7 +2111,16 @@
 		const out = [];
 		declared.forEach((c, index) => {
 			if (c.hidden) return;
-			out.push({ index, title: c.title || '', kind: c.kind || '', buttonText: c.buttonText || '' });
+			out.push({
+				index,
+				title: c.title || '',
+				kind: c.kind || '',
+				buttonText: c.buttonText || '',
+				width: c.width || 0,
+				sizeMode: c.sizeMode || '',
+				align: c.align || '',
+				readOnly: !!c.readOnly,
+			});
 		});
 		return out;
 	}
@@ -2154,7 +2169,9 @@
 		const readOnly = propOr(spec, 'readOnly', 'false') === 'true';
 		const frozen = parseInt(propOr(spec, 'frozenColumns', '0'), 10) || 0;
 
-		const { widths, canScrollH, canScrollV } = gridComputeWidths(cols, rows, spec);
+		const { widths, canScrollH, canScrollV } = gridComputeWidths(cols, rows, spec, drawn);
+		const picked = selectedColumn && selectedColumn.id === spec.id ? selectedColumn.index : -1;
+		const alignClass = (col) => (col && col.align === 'AlignRight' ? ' cc-align-right' : col && col.align === 'AlignCenter' ? ' cc-align-center' : '');
 		const template = widths.map((w) => `${w}px`).join(' ');
 		const totalW = widths.reduce((a, b) => a + b, 0);
 
@@ -2176,9 +2193,21 @@
 			header.style.height = GRID_HEADER_H + 'px';
 			cols.forEach((title, i) => {
 				const cell = document.createElement('div');
-				cell.className = 'cc-grid-cell cc-grid-headcell';
+				cell.className = 'cc-grid-cell cc-grid-headcell' + alignClass(drawn[i]) + (drawn[i].index === picked ? ' cc-col-picked' : '');
 				if (i < frozen) cell.classList.add('cc-grid-frozen');
 				cell.textContent = title;
+				// A click on a header picks the column, as in Visual Studio:
+				// the panel then edits that column.
+				if (spec.columns || spec.items) {
+					cell.style.pointerEvents = 'auto';
+					cell.title = `Edit the ${title || 'column'} column`;
+					const index = drawn[i].index;
+					cell.addEventListener('mousedown', (e) => {
+						if (e.button === 2 || tabOrderMode) return;
+						e.stopPropagation();
+						pickColumn(spec.id, index);
+					});
+				}
 				header.appendChild(cell);
 			});
 			table.appendChild(header);
@@ -2193,9 +2222,26 @@
 			rowEl.style.height = h + 'px';
 			for (let i = 0; i < cols.length; i++) {
 				const cell = document.createElement('div');
-				cell.className = 'cc-grid-cell';
+				cell.className = 'cc-grid-cell' + alignClass(drawn[i]) + (drawn[i].index === picked ? ' cc-col-picked' : '') + (drawn[i].readOnly ? ' cc-col-readonly' : '');
 				if (i < frozen) cell.classList.add('cc-grid-frozen');
 				fillGridCell(cell, drawn[i], i < row.length ? row[i] : '');
+				rowEl.appendChild(cell);
+			}
+			table.appendChild(rowEl);
+			contentH += h;
+		}
+		// The row for new records, when the user may add them - marked *, as
+		// the running grid marks it.
+		if (propOr(spec, 'allowUserToAddRows', 'false') === 'true' && !readOnly) {
+			const h = gridRowHeight([], spec);
+			const rowEl = document.createElement('div');
+			rowEl.className = 'cc-grid-row cc-grid-newrow';
+			rowEl.style.gridTemplateColumns = template;
+			rowEl.style.height = h + 'px';
+			for (let i = 0; i < cols.length; i++) {
+				const cell = document.createElement('div');
+				cell.className = 'cc-grid-cell' + (drawn[i].index === picked ? ' cc-col-picked' : '');
+				cell.textContent = i === 0 ? '*' : '';
 				rowEl.appendChild(cell);
 			}
 			table.appendChild(rowEl);
@@ -2224,6 +2270,21 @@
 			c.title = 'Sample rows - no AddRow(...) calls found in the source.';
 		}
 		return c;
+	}
+
+	// pickColumn selects a grid and one of its columns, and shows the column
+	// in the panel.
+	function pickColumn(id, index) {
+		selectedColumn = { id, index };
+		if (!(selectedIds.size === 1 && selectedId === id)) setSelection(id, false);
+		updateSelectionClasses();
+		propsDigest = null;
+		renderProperties();
+		renderOutline();
+		showTab('properties');
+		const spec = findControl(id);
+		const el = rendered.get(id);
+		if (spec && el) updateControlContent(el, spec);
 	}
 
 	// fakeScrollBar draws the scrollbar Fyne will show once content
@@ -3366,8 +3427,16 @@
 		const panel = $('properties-panel');
 		const spec = selectedId ? findControl(selectedId) : null;
 
+		if (selectedColumn && selectedColumn.id !== selectedId) {
+			// The grid it was picked on loses the mark.
+			const was = findControl(selectedColumn.id);
+			selectedColumn = null;
+			const el = was && rendered.get(was.id);
+			if (el) updateControlContent(el, was);
+		}
 		const digest = JSON.stringify([
 			selectedId,
+			selectedColumn && selectedColumn.index,
 			selectedIds.size,
 			// The form's own panel is what shows when nothing is selected, so
 			// its values belong in the digest too.
@@ -3446,6 +3515,7 @@
 		if (spec.type === 'ComboBox' || spec.type === 'ListBox') {
 			appendItemsGroup(panel, spec, 'Items');
 		} else if (spec.type === 'DataGridView') {
+			if (selectedColumn && selectedColumn.id === spec.id) appendColumnGroup(panel, spec, selectedColumn.index);
 			appendColumnsGroup(panel, spec);
 		} else if (spec.type === 'ListView') {
 			appendItemsGroup(panel, spec, 'Columns');
@@ -3812,6 +3882,101 @@
 		{ value: 'CheckBox', label: 'Checkbox' },
 	];
 
+	// The grid's columns, as the table the setColumns op takes.
+	function gridColumnsOf(spec) {
+		return (spec.columns && spec.columns.length ? spec.columns : (spec.items || []).map((t) => ({ title: t }))).map((c) => Object.assign({}, c));
+	}
+
+	const SIZE_MODES = [
+		{ value: '', label: '(the grid\'s)' },
+		{ value: 'SizeFixed', label: 'Fixed' },
+		{ value: 'SizeToContent', label: 'To content' },
+		{ value: 'SizeFill', label: 'Fill' },
+	];
+	const ALIGNS = [
+		{ value: '', label: 'Left' },
+		{ value: 'AlignCenter', label: 'Centre' },
+		{ value: 'AlignRight', label: 'Right' },
+	];
+
+	// appendColumnGroup edits the one column picked on the canvas (or with
+	// ⚙ in the Columns list): everything about it, in rows like any other
+	// properties.
+	function appendColumnGroup(panel, spec, index) {
+		const columns = gridColumnsOf(spec);
+		const col = columns[index];
+		if (!col) return;
+		const g = groupEl(`Column ${index + 1}: ${col.title || ''}`);
+		const commit = () => post({ type: 'apply', ops: [{ op: 'setColumns', id: spec.id, columns }] });
+		const row = (label, key, el, help) => {
+			const r = document.createElement('div');
+			r.className = 'prop-row';
+			r.dataset.prop = 'column.' + key;
+			const l = document.createElement('label');
+			l.textContent = label;
+			r.appendChild(l);
+			r.appendChild(el);
+			r.addEventListener('mouseenter', () => showHelp(label, help));
+			g.appendChild(r);
+		};
+		const text = (value, commitValue) => {
+			const input = document.createElement('input');
+			input.type = 'text';
+			input.value = value || '';
+			input.dataset.initial = input.value;
+			input.addEventListener('change', () => commitValue(input.value));
+			input.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') input.blur();
+			});
+			return input;
+		};
+		const select = (options, value, commitValue) => {
+			const sel = document.createElement('select');
+			for (const o of options) {
+				const opt = document.createElement('option');
+				opt.value = o.value;
+				opt.textContent = o.label;
+				sel.appendChild(opt);
+			}
+			sel.value = value || '';
+			sel.addEventListener('change', () => commitValue(sel.value));
+			return sel;
+		};
+		const check = (value, commitValue) => {
+			const cb = document.createElement('input');
+			cb.type = 'checkbox';
+			cb.checked = !!value;
+			cb.addEventListener('change', () => commitValue(cb.checked));
+			return cb;
+		};
+		const set = (key, v) => {
+			if (v === '' || v === false || v === 0 || v === undefined) delete col[key];
+			else col[key] = v;
+			commit();
+		};
+
+		row('HeaderText', 'title', text(col.title, (v) => { col.title = v; commit(); }), 'The caption in the column\'s header.');
+		row('ColumnType', 'kind', select(COLUMN_KINDS, col.kind, (v) => {
+			set('kind', v);
+		}), 'What the cells are: text, a button per row, or a check box.');
+		if (col.kind === 'Button') {
+			row('Text', 'buttonText', text(col.buttonText, (v) => set('buttonText', v.trim())), 'The caption on every button; empty uses each cell\'s own value.');
+		}
+		row('DataPropertyName', 'dataPropertyName', text(col.dataPropertyName, (v) => set('dataPropertyName', v.trim())), 'The field of a bound record this column shows.');
+		const width = document.createElement('input');
+		width.type = 'number';
+		width.min = '0';
+		width.value = col.width ? String(col.width) : '';
+		width.placeholder = '100';
+		width.addEventListener('change', () => set('width', Math.max(0, Number(width.value) || 0)));
+		row('Width', 'width', width, 'A fixed width in pixels. Setting one makes the column Fixed.');
+		row('AutoSizeMode', 'sizeMode', select(SIZE_MODES, col.sizeMode, (v) => set('sizeMode', v)), 'How this column is sized: a fixed width, the width of its content, or a share of what the others leave. Empty follows the grid\'s mode.');
+		row('Alignment', 'align', select(ALIGNS, col.align, (v) => set('align', v)), 'Where the column\'s text sits, header included.');
+		row('ReadOnly', 'readOnly', check(col.readOnly, (v) => set('readOnly', v)), 'Whether the cells of this column can be edited.');
+		row('Visible', 'hidden', check(!col.hidden, (v) => set('hidden', !v)), 'A hidden column keeps its data - Cell() still reads it - but is not drawn.');
+		panel.appendChild(g);
+	}
+
 	function appendColumnsGroup(panel, spec) {
 		const g = groupEl('Columns');
 		// Edits are staged against a local copy and sent as one setColumns -
@@ -3929,6 +4094,7 @@
 		});
 		row.appendChild(dataProp);
 
+		row.appendChild(iconButton('⚙', 'Edit everything about this column: width, sizing, alignment, read-only', () => pickColumn(spec.id, i)));
 		row.appendChild(
 			iconButton(col.hidden ? '🚫' : '👁', col.hidden ? 'Hidden: shown in code only' : 'Visible', () => {
 				col.hidden = !col.hidden;

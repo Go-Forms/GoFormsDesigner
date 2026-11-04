@@ -388,6 +388,9 @@ func planSetColumns(r *parseResult, op Op) ([]edit, error) {
 	if len(op.Columns) == 0 {
 		return nil, fmt.Errorf("a grid with no columns would render as an empty box; keep at least one")
 	}
+	if err := checkColumns(op.Columns); err != nil {
+		return nil, err
+	}
 
 	// 1. The titles, in the constructor's argument list.
 	if pc.itemsRange == nil {
@@ -1291,4 +1294,36 @@ func afterConstructionLine(r *parseResult, pc *pcontrol) (int, string) {
 		insertAt++
 	}
 	return insertAt, indent
+}
+
+// checkColumns refuses a column setting the grid has no constant for.
+func checkColumns(cols []GridColumnSpec) error {
+	in := func(v string, allowed ...string) bool {
+		for _, a := range allowed {
+			if v == a {
+				return true
+			}
+		}
+		return false
+	}
+	for i, c := range cols {
+		if !in(c.Kind, "", "Text", "Button", "CheckBox") {
+			return fmt.Errorf("column %d: unknown kind %q", i+1, c.Kind)
+		}
+		if !in(c.SizeMode, "", "SizeFixed", "SizeToContent", "SizeFill") {
+			return fmt.Errorf("column %d: unknown size mode %q", i+1, c.SizeMode)
+		}
+		if !in(c.Align, "", "AlignLeft", "AlignCenter", "AlignRight") {
+			return fmt.Errorf("column %d: unknown alignment %q", i+1, c.Align)
+		}
+		if c.Width < 0 {
+			return fmt.Errorf("column %d: a width cannot be negative", i+1)
+		}
+		if c.DataPropertyName != "" {
+			if err := validateGoIdent(c.DataPropertyName); err != nil {
+				return fmt.Errorf("column %d: the field %w", i+1, err)
+			}
+		}
+	}
+	return nil
 }

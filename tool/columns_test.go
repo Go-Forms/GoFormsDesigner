@@ -191,3 +191,34 @@ func TestColumnsKeepSettersBeyondTheTitles(t *testing.T) {
 		t.Errorf("the setter beyond the titles was lost: %+v", cols[4])
 	}
 }
+
+func TestAColumnsWidthModeAlignmentAndReadOnlyRoundTrip(t *testing.T) {
+	path := writeFixture(t, designerFixture)
+	cols := []GridColumnSpec{
+		{Title: "ID", Width: 60, ReadOnly: true},
+		{Title: "Customer", SizeMode: "SizeFill", DataPropertyName: "Name"},
+		{Title: "Total", SizeMode: "SizeToContent", Align: "AlignRight"},
+	}
+	model, src := mustApply(t, path,
+		Op{Op: "add", ID: "grd", Type: "DataGridView", W: 300, H: 100, Items: []string{"ID", "Customer", "Total"}},
+		Op{Op: "setColumns", ID: "grd", Columns: cols},
+	)
+	for _, want := range []string{
+		"mf.grd.SetColumnWidth(0, 60)",
+		"mf.grd.SetColumnReadOnly(0, true)",
+		"mf.grd.SetColumnSizeMode(1, goforms.SizeFill)",
+		"mf.grd.SetColumnSizeMode(2, goforms.SizeToContent)",
+		"mf.grd.SetColumnAlign(2, goforms.AlignRight)",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("want %s in\n%s", want, src)
+		}
+	}
+	got := findControl(t, model, "grd").Columns
+	if len(got) != 3 || got[0].Width != 60 || !got[0].ReadOnly || got[1].SizeMode != "SizeFill" || got[2].Align != "AlignRight" {
+		t.Errorf("read back %+v", got)
+	}
+	if _, err := applyOps(path, []Op{{Op: "setColumns", ID: "grd", Columns: []GridColumnSpec{{Title: "x", Align: "Middle"}}}}); err == nil {
+		t.Error("accepted an alignment the grid has no constant for")
+	}
+}

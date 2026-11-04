@@ -101,6 +101,20 @@ New projects get framework **v0.4.0**, which these need.
   name it out of every control's block, and a component added after the
   controls that use it is moved above them - it has to exist first.
 
+### DataGridView
+
+- **A column is picked by clicking its header** on the canvas (or ⚙ in the
+  Columns list), and the panel edits that column: HeaderText, ColumnType,
+  DataPropertyName, **Width**, **AutoSizeMode**, **Alignment**,
+  **ReadOnly** and Visible. The canvas sizes each column by its own width and
+  mode, as the grid does - checked against GoForms' golden fixture, which now
+  has mixed-mode cases - and aligns its text.
+- **allowUserToAddRows** draws the row for new records (*) below the others;
+  typing into it at runtime adds a row - on a bound grid, a record appended
+  to the slice the BindingSource was given by pointer. **allowUserToDeleteRows**
+  lets Delete remove the selected row. Their events, UserAddedRow,
+  UserDeletingRow (cancellable) and UserDeletedRow, are in the Events list.
+
 ### Elsewhere
 
 - **Outline**: a third tab shows the form as a tree, front-most first, with

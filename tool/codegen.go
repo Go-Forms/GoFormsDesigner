@@ -405,6 +405,20 @@ func columnLines(recvVar string, spec *ControlSpec, indent string) string {
 		if c.DataPropertyName != "" {
 			fmt.Fprintf(&b, "%s%s.%s.SetColumnDataPropertyName(%d, %s)\n", indent, recvVar, spec.ID, i, quote(c.DataPropertyName))
 		}
+		// The width before the mode: SetColumnWidth also makes the column
+		// SizeFixed, which a mode written after it then overrides.
+		if c.Width > 0 {
+			fmt.Fprintf(&b, "%s%s.%s.SetColumnWidth(%d, %s)\n", indent, recvVar, spec.ID, i, fnum(c.Width))
+		}
+		if c.SizeMode != "" && !(c.SizeMode == "SizeFixed" && c.Width > 0) {
+			fmt.Fprintf(&b, "%s%s.%s.SetColumnSizeMode(%d, goforms.%s)\n", indent, recvVar, spec.ID, i, c.SizeMode)
+		}
+		if c.Align != "" && c.Align != "AlignLeft" {
+			fmt.Fprintf(&b, "%s%s.%s.SetColumnAlign(%d, goforms.%s)\n", indent, recvVar, spec.ID, i, c.Align)
+		}
+		if c.ReadOnly {
+			fmt.Fprintf(&b, "%s%s.%s.SetColumnReadOnly(%d, true)\n", indent, recvVar, spec.ID, i)
+		}
 	}
 	return b.String()
 }

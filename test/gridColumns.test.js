@@ -255,3 +255,57 @@ test('a button column with no caption falls back to the cell value', () => {
 	assert.equal(btns.length, 1);
 	assert.equal(btns[0].textContent, 'Approve');
 });
+
+// --- a column picked on the canvas ----------------------------------------
+
+const headerCells = (dom) => dom.el('form-canvas').descendants.filter((e) => e.className.split(' ').includes('cc-grid-headcell'));
+
+test('clicking a header picks the column, and the panel edits it', () => {
+	const dom = boot([gridSpec({ columns: [{ title: 'ID' }, { title: 'Customer' }] })]);
+	headerCells(dom)[1].dispatch('mousedown', { button: 0 });
+	const panel = dom.el('properties-panel').descendants;
+	assert.ok(panel.some((e) => e.textContent === 'Column 2: Customer'), 'no Column group for the picked column');
+	assert.ok(headerCells(dom)[1].className.includes('cc-col-picked'), 'the picked header is not marked');
+
+	const width = panel.find((e) => e.dataset.prop === 'column.width').children.find((c) => c.tagName === 'INPUT');
+	width.value = '80';
+	width.dispatch('change', {});
+	const op = dom.posted.filter((m) => m.type === 'apply').pop().ops[0];
+	assert.equal(op.op, 'setColumns');
+	assert.deepEqual(op.columns[1], { title: 'Customer', width: 80 });
+});
+
+test('a picked column sets its mode, alignment and read-only', () => {
+	const dom = boot([gridSpec({ columns: [{ title: 'Total' }] })]);
+	headerCells(dom)[0].dispatch('mousedown', { button: 0 });
+	const row = (key) => dom.el('properties-panel').descendants.find((e) => e.dataset.prop === 'column.' + key);
+	const align = row('align').children.find((c) => c.tagName === 'SELECT');
+	align.value = 'AlignRight';
+	align.dispatch('change', {});
+	const ro = row('readOnly').children.find((c) => c.tagName === 'INPUT');
+	ro.checked = true;
+	ro.dispatch('change', {});
+	const cols = dom.posted.filter((m) => m.type === 'apply').pop().ops[0].columns;
+	assert.deepEqual(cols[0], { title: 'Total', align: 'AlignRight', readOnly: true });
+});
+
+test('⚙ in the Columns list picks the column too', () => {
+	const dom = boot([gridSpec({ columns: [{ title: 'A' }, { title: 'B' }] })]);
+	clickControl(dom, 'grd1');
+	const gear = dom.el('properties-panel').descendants.filter((e) => e.textContent === '⚙');
+	gear[0].dispatch('click', {});
+	assert.ok(dom.el('properties-panel').descendants.some((e) => e.textContent === 'Column 1: A'));
+});
+
+test('a grid that lets the user add rows draws the row for new records', () => {
+	const dom = boot([gridSpec({ props: { allowUserToAddRows: 'true' } })]);
+	const rows = dom.el('form-canvas').descendants.filter((e) => e.className.includes('cc-grid-newrow'));
+	assert.equal(rows.length, 1);
+	assert.equal(rows[0].children[0].textContent, '*');
+});
+
+test('a column with its own width is drawn that wide', () => {
+	const dom = boot([gridSpec({ columns: [{ title: 'ID', width: 70 }, { title: 'Name' }] })]);
+	const header = dom.el('form-canvas').descendants.find((e) => e.className === 'cc-grid-header');
+	assert.match(header.style.gridTemplateColumns, /^70px /);
+});

@@ -1180,7 +1180,8 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 // per-column setters.
 func isColumnSetter(method string) bool {
 	switch method {
-	case "SetColumnKind", "SetColumnHidden", "SetColumnButtonText", "SetColumnDataPropertyName":
+	case "SetColumnKind", "SetColumnHidden", "SetColumnButtonText", "SetColumnDataPropertyName",
+		"SetColumnWidth", "SetColumnSizeMode", "SetColumnAlign", "SetColumnReadOnly":
 		return true
 	}
 	return false
@@ -1221,6 +1222,25 @@ func (r *parseResult) applyColumnSetter(pc *pcontrol, method string, args []ast.
 	case "SetColumnDataPropertyName":
 		if v, ok := litString(args[1]); ok {
 			col.DataPropertyName = v
+		}
+	case "SetColumnWidth":
+		if v, ok := litFloat(args[1]); ok {
+			col.Width = v
+		}
+	case "SetColumnSizeMode":
+		if name, ok := qualifiedName(args[1]); ok {
+			col.SizeMode = name
+		}
+	case "SetColumnAlign":
+		if name, ok := qualifiedName(args[1]); ok {
+			col.Align = name
+			if col.Align == "AlignLeft" {
+				col.Align = "" // the default, spelled the way the model spells it
+			}
+		}
+	case "SetColumnReadOnly":
+		if v, ok := litBool(args[1]); ok {
+			col.ReadOnly = v
 		}
 	}
 }

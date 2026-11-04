@@ -209,6 +209,106 @@
       ]
     },
     {
+      "name": "per-column modes: a fixed id, a filling name, a fitted total",
+      "cols": [
+        "ID",
+        "Customer",
+        "Total"
+      ],
+      "rows": [
+        [
+          "1001",
+          "Acme Corporation",
+          "$1,240.00"
+        ]
+      ],
+      "width": 500,
+      "columnsMode": "SizeFixed",
+      "rowsMode": "SizeFixed",
+      "rowHeight": 28,
+      "scrollBars": "ScrollBarsVertical",
+      "modes": [
+        "SizeFixed",
+        "SizeFill",
+        "SizeToContent"
+      ],
+      "fixed": [
+        60,
+        0,
+        0
+      ],
+      "widths": [
+        60,
+        344.39062,
+        79.609375
+      ],
+      "rowHeights": [
+        28
+      ],
+      "measured": [
+        [
+          15.8125,
+          68.21875,
+          34.609375
+        ],
+        [
+          32.0625,
+          119.625,
+          63.609375
+        ]
+      ]
+    },
+    {
+      "name": "two fill columns share the slack; a narrow fixed one is clamped",
+      "cols": [
+        "A",
+        "B",
+        "C"
+      ],
+      "rows": [
+        [
+          "x",
+          "y",
+          "z"
+        ]
+      ],
+      "width": 400,
+      "columnsMode": "SizeFill",
+      "rowsMode": "SizeFixed",
+      "rowHeight": 30,
+      "scrollBars": "ScrollBarsNone",
+      "modes": [
+        "SizeFixed",
+        "",
+        ""
+      ],
+      "fixed": [
+        20,
+        0,
+        0
+      ],
+      "widths": [
+        40,
+        180,
+        180
+      ],
+      "rowHeights": [
+        30
+      ],
+      "measured": [
+        [
+          9.65625,
+          9.40625,
+          8.921875
+        ],
+        [
+          7.40625,
+          7.140625,
+          6.578125
+        ]
+      ]
+    },
+    {
       "name": "auto row heights with multi-line cells",
       "cols": [
         "A",
