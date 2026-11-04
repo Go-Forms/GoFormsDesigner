@@ -405,3 +405,112 @@ test('a project control in the toolbox is added with where it comes from', () =>
 		delete catalog['widgets.Gauge'];
 	}
 });
+
+// --- menus, tips, bindings, pictures, unwiring -----------------------------
+
+test('a wired event can be unwired, and the method stays', () => {
+	const dom = boot([ctl('b', 'Button', { events: { Click: 'b_Click' } })]);
+	click(dom, 'b');
+	const x = dom.el('properties-panel').descendants.find((e) => e.className === 'unwire-btn');
+	assert.ok(x, 'no ✕ beside a wired event');
+	x.dispatch('click', {});
+	assert.deepEqual(lastOps(dom), [{ op: 'removeEvent', id: 'b', event: 'Click' }]);
+});
+
+test('every control offers a tip from each ToolTip of the form', () => {
+	catalog.ToolTip = desc({ Type: 'ToolTip', NonVisual: true, Setters: {}, Kinds: {}, Events: [] });
+	try {
+		const dom = boot([ctl('b', 'Button', { toolTips: { toolTip1: 'old' } }), ctl('toolTip1', 'ToolTip')]);
+		click(dom, 'b');
+		const row = dom.el('properties-panel').descendants.find((e) => e.dataset.prop === 'toolTip.toolTip1');
+		assert.ok(row, 'no "ToolTip on toolTip1"');
+		const input = row.children.find((c) => c.tagName === 'INPUT');
+		assert.equal(input.value, 'old');
+		input.value = 'Saves';
+		input.dispatch('change', {});
+		assert.deepEqual(lastOps(dom), [{ op: 'setToolTip', id: 'b', prop: 'toolTip1', value: 'Saves' }]);
+	} finally {
+		delete catalog.ToolTip;
+	}
+});
+
+test('a bindable control binds a property to a field of a BindingSource', () => {
+	catalog.BindingSource = desc({ Type: 'BindingSource', NonVisual: true, Setters: {}, Kinds: {}, Events: [] });
+	catalog.TextBox.Bindable = ['Text'];
+	try {
+		const dom = boot([ctl('txt', 'TextBox'), ctl('bs', 'BindingSource')]);
+		click(dom, 'txt');
+		const row = dom.el('properties-panel').descendants.find((e) => e.dataset.prop === 'binding.Text');
+		assert.ok(row, 'no (DataBindings) Text row');
+		const [source] = row.children.filter((c) => c.tagName === 'SELECT');
+		const member = row.children.find((c) => c.tagName === 'INPUT');
+		source.value = 'bs';
+		member.value = 'Name';
+		member.dispatch('change', {});
+		assert.deepEqual(lastOps(dom), [{ op: 'setBinding', id: 'txt', prop: 'Text', value: 'bs.Name' }]);
+	} finally {
+		delete catalog.BindingSource;
+		delete catalog.TextBox.Bindable;
+	}
+});
+
+test('a reference property lists the components of its type', () => {
+	catalog.ContextMenu = desc({ Type: 'ContextMenu', NonVisual: true, Setters: {}, Kinds: {}, Events: [] });
+	catalog.Button.Setters.SetContextMenu = 'contextMenu';
+	catalog.Button.Kinds.contextMenu = 'ref:ContextMenu';
+	try {
+		const dom = boot([ctl('b', 'Button'), ctl('cms1', 'ContextMenu')]);
+		click(dom, 'b');
+		const row = dom.el('properties-panel').descendants.find((e) => e.dataset.prop === 'contextMenu');
+		const select = row.children.find((c) => c.tagName === 'SELECT');
+		assert.deepEqual(select.children.map((o) => o.value), ['', 'cms1']);
+		select.value = 'cms1';
+		select.dispatch('change', {});
+		assert.deepEqual(lastOps(dom), [{ op: 'setProp', id: 'b', prop: 'contextMenu', value: 'cms1' }]);
+	} finally {
+		delete catalog.ContextMenu;
+		delete catalog.Button.Setters.SetContextMenu;
+		delete catalog.Button.Kinds.contextMenu;
+	}
+});
+
+test('a paste into another form drops a reference to a component it lacks', () => {
+	catalog.Button.Kinds.contextMenu = 'ref:ContextMenu';
+	try {
+		const b = ctl('b', 'Button', { props: { contextMenu: 'cms1', anchor: 'AnchorTop' }, toolTips: { toolTip1: 'x' } });
+		const dom = boot([]);
+		dom.send({ type: 'pasteData', sameForm: false, data: { roots: ['b'], controls: [b] } });
+		const add = lastOps(dom).find((o) => o.op === 'add');
+		assert.deepEqual(add.props, { anchor: 'AnchorTop' });
+		assert.equal(add.toolTips, undefined);
+	} finally {
+		delete catalog.Button.Kinds.contextMenu;
+	}
+});
+
+test('the form shows its MenuStrip as a menu bar', () => {
+	catalog.MenuStrip = desc({ Type: 'MenuStrip', NonVisual: true, Setters: {}, Kinds: {}, Events: [], Collection: { Label: 'Items', Tree: true, InCtor: true } });
+	try {
+		const dom = boot([ctl('menuStrip1', 'MenuStrip', { collection: [{ text: 'File' }, { text: 'Open', depth: 1 }, { text: 'Help' }] })]);
+		const bar = dom.el('form-canvas').children.find((c) => c.className === 'form-menubar');
+		assert.ok(bar, 'no menu bar');
+		assert.deepEqual(bar.children.map((m) => m.textContent), ['File', 'Help']);
+	} finally {
+		delete catalog.MenuStrip;
+	}
+});
+
+test('a menu item\'s handler stub takes EventArgs', () => {
+	catalog.ContextMenu = desc({ Type: 'ContextMenu', NonVisual: true, Setters: {}, Kinds: {}, Events: [], Collection: { Label: 'Items', Tree: true, Handler: true, Separator: true, InCtor: true, HandlerArgs: 'EventArgs' } });
+	try {
+		const dom = boot([ctl('cms', 'ContextMenu', { collection: [{ text: 'Copy' }] })]);
+		dom.el('component-tray-items').children[0].dispatch('click', {});
+		const wire = dom.el('properties-panel').descendants.find((e) => e.className === 'coll-btn' && e.textContent === '⚡');
+		wire.dispatch('click', {});
+		const msg = dom.posted.filter((m) => m.type === 'apply').pop();
+		assert.deepEqual(msg.handlers, [{ method: 'cms_Copy_Click', paramType: 'EventArgs' }].map((h) => ({ method: msg.handlers[0].method, paramType: h.paramType })));
+		assert.equal(msg.handlers[0].paramType, 'EventArgs');
+	} finally {
+		delete catalog.ContextMenu;
+	}
+});

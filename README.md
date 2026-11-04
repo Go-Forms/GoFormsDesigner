@@ -57,6 +57,16 @@ does. The ◂ smart tag on a selected control offers its usual tasks - Dock in
 Parent Container, Add Tab, Add Column, Edit Items. Renaming a control renames
 its field, every reference to it, and any handler still named after it.
 
+**Menus, tool tips, data and pictures.** A MenuStrip's and a ContextMenu's
+items are edited as a tree, with a click handler per item; the form's menu
+bar is drawn above the canvas. A ToolTip gives every control a "ToolTip on
+toolTip1" box. A BindingSource is what a grid, a list or a combo box shows -
+one row or item per record - and the (DataBindings) group ties a TextBox, a
+CheckBox or a NumericUpDown to a field of the current record; a grid's
+columns can be made from a struct of the project. A picture for a PictureBox
+or the form's icon is copied into the form's folder and embedded with
+go:embed. ✕ beside an event unwires it.
+
 **Shows the form as a tree.** The Outline tab lists the controls front-most
 first, containers with what is inside them; drag a control onto a container to
 move it there, or above or below another to change the z-order.

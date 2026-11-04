@@ -25,6 +25,8 @@ export interface CollectionItem {
 	handler?: string;
 	/** Nesting level for tree-shaped collections; 0 or absent is a root. */
 	depth?: number;
+	/** A menu item made with SetEnabled(false). */
+	disabled?: boolean;
 }
 
 /** One DataGridView column as the designer edits it: the header caption
@@ -39,6 +41,8 @@ export interface GridColumnSpec {
 	hidden?: boolean;
 	/** Fixed caption on a button column; empty uses each cell's own value. */
 	buttonText?: string;
+	/** The field of a bound record the column shows. */
+	dataPropertyName?: string;
 }
 
 /** Where a control sits in a TableLayoutPanel. Mirrors the tool's CellSpec;
@@ -79,6 +83,10 @@ export interface ControlSpec {
 	props?: Record<string, string>;
 	events?: Record<string, string>;
 	group?: string;
+	/** The tip each ToolTip of the form gives this control, by ToolTip. */
+	toolTips?: Record<string, string>;
+	/** Properties bound to a BindingSource's current record, by property. */
+	bindings?: Record<string, { source: string; member: string }>;
 	/** The cell this control is in, when its TableLayoutPanel names one. */
 	cell?: CellSpec;
 	/** A TableLayoutPanel's columns and rows. */
@@ -127,7 +135,10 @@ export interface Op {
 		| 'resetProp'
 		| 'reorder'
 		| 'setCell'
-		| 'setTable';
+		| 'setTable'
+		| 'removeEvent'
+		| 'setToolTip'
+		| 'setBinding';
 	/** Unused (pass "") for "setForm", which resizes the Form itself rather
 	 * than a specific control. */
 	id: string;
@@ -163,6 +174,18 @@ export interface Op {
 	tableRows?: TrackSpec[];
 	/** For "add" of a project control: its ControlDesc.Custom. */
 	custom?: ControlDesc['Custom'];
+	/** For "add": a copied control's tips and bindings. */
+	toolTips?: Record<string, string>;
+	bindings?: Record<string, { source: string; member: string }>;
+}
+
+/** A struct of the project a grid's columns can be made from. Mirrors the
+ * tool's DataType. */
+export interface DataType {
+	import: string;
+	package: string;
+	name: string;
+	fields: { name: string; type: string }[];
 }
 
 /** What `set-startup` did to main.go. Mirrors the tool's StartupResult. */
@@ -513,6 +536,11 @@ export class GoFormsTool {
 	 * `file` - nothing of the project is built or run. */
 	async projectControls(file: string): Promise<Record<string, ControlDesc>> {
 		return JSON.parse(await this.run(['project-controls', file])) as Record<string, ControlDesc>;
+	}
+
+	/** The project's structs, for making a grid's columns from one. */
+	async projectTypes(file: string): Promise<DataType[]> {
+		return JSON.parse(await this.run(['project-types', file])) as DataType[];
 	}
 
 	/** Points main.go's goforms.Run at the form a designer file declares. */

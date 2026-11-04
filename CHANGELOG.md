@@ -73,6 +73,34 @@ carries it over.
   Parent Container, Add or Remove Tab, Add and Edit Columns, Edit Items, a
   table's Add Column and Add Row, a flow's direction.
 
+### Menus, tips, data, pictures
+
+New projects get framework **v0.4.0**, which these need.
+
+- **MenuStrip and ContextMenu** are in the toolbox (Menus & Toolbars) and
+  land on the tray. Their items are edited as a tree - nest with ⇥ and ⇤,
+  separators, a click handler per item, ✓ to disable one - and written as
+  the one expression GoForms builds a menu with. The form's MenuStrip is
+  drawn as its menu bar above the canvas and set with SetMainMenu; every
+  control has a **contextMenu** property naming a ContextMenu of the form.
+- **ToolTip** is an extender, as in WinForms: with one on the tray, every
+  control's panel has a "ToolTip on toolTip1" box.
+- **Data binding**: a **BindingSource** on the tray is what a DataGridView's,
+  a ListBox's or a ComboBox's **dataSource** names; a list's
+  **displayMember** is the field it shows; each grid column has the field it
+  shows; and a **(DataBindings)** group ties a TextBox's Text, a CheckBox's
+  Checked or a NumericUpDown's Value to a field of the current record. The
+  grid's smart tag makes its columns **from a type** of the project, one
+  per exported field. The records are given in code:
+  `mf.bindingSource1.SetDataSource(customers)`.
+- **Pictures**: **…** beside a PictureBox's `image` or the form's `icon`
+  picks a file, copies it into the form's `resources/` folder and embeds it
+  with go:embed, so it travels inside the binary. The canvas draws it.
+- **✕** beside a wired event unwires it; the method stays in the code.
+- Deleting a ToolTip, a ContextMenu or a BindingSource takes the lines that
+  name it out of every control's block, and a component added after the
+  controls that use it is moved above them - it has to exist first.
+
 ### Elsewhere
 
 - **Outline**: a third tab shows the form as a tree, front-most first, with

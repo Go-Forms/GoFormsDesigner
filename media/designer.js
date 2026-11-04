@@ -65,6 +65,9 @@
 	const pageChoice = {};
 	// smartOpen is the control whose Tasks panel (its smart tag) is open.
 	let smartOpen = null;
+	// resourceBase is where the webview can load the form's folder from, for
+	// drawing its embedded pictures (see designerEditorProvider.ts).
+	let resourceBase = '';
 	// outlineCollapsed holds the Outline nodes folded shut.
 	const outlineCollapsed = new Set();
 	// The geometry and the panel layout ports, loaded before this file (see
@@ -126,6 +129,12 @@
 				break;
 			case 'pasteData':
 				pasteControls(msg.data, !!msg.sameForm, null);
+				break;
+			case 'resourceBase':
+				resourceBase = msg.uri || '';
+				break;
+			case 'dataType':
+				columnsFromType(msg.id, msg.fields || []);
 				break;
 			case 'handlerWired':
 				model = normalizeModel(msg.model);
@@ -472,9 +481,51 @@
 			if (c.collection) {
 				op.collection = c.collection.map((item) => (sameForm ? item : Object.assign({}, item, { handler: undefined })));
 			}
-			if (c.props && Object.keys(c.props).length) op.props = c.props;
+			// References to the form's components - a ContextMenu, a
+			// BindingSource, a ToolTip - follow the copy when the component was
+			// copied with it, stay when this form has it, and are dropped
+			// otherwise: they would name a field that does not exist.
+			const refTo = (refId, refType) => {
+				if (rename.has(refId) && data.controls.some((x) => x.id === refId && x.type === refType)) return rename.get(refId);
+				const here = findControl(refId);
+				return here && here.type === refType && sameForm ? refId : null;
+			};
+			if (c.props && Object.keys(c.props).length) {
+				const props = {};
+				for (const [k, v] of Object.entries(c.props)) {
+					const kind = propKind(desc, k);
+					if (kind.startsWith('ref:')) {
+						const to = refTo(v, kind.slice(4));
+						if (to) props[k] = to;
+					} else if (kind !== 'image') {
+						props[k] = v;
+					}
+				}
+				if (Object.keys(props).length) op.props = props;
+			}
+			if (c.toolTips) {
+				const tips = {};
+				for (const [tip, text] of Object.entries(c.toolTips)) {
+					const to = refTo(tip, 'ToolTip');
+					if (to) tips[to] = text;
+				}
+				if (Object.keys(tips).length) op.toolTips = tips;
+			}
+			if (c.bindings) {
+				const binds = {};
+				for (const [prop, b] of Object.entries(c.bindings)) {
+					const to = refTo(b.source, 'BindingSource');
+					if (to) binds[prop] = { source: to, member: b.member };
+				}
+				if (Object.keys(binds).length) op.bindings = binds;
+			}
 			if (sameForm && c.events && Object.keys(c.events).length) op.events = c.events;
 			ops.push(op);
+			// A picture is the form folder's file; in the same form it can be
+			// embedded again.
+			for (const p of desc.Special || []) {
+				if (sameForm && c.props && c.props[p]) ops.push({ op: 'setProp', id, prop: p, value: c.props[p] });
+			}
 			// The constructor carries the text of most types; for the rest
 			// (a TextBox) it is a SetText call, which "add" does not write.
 			if (c.text && desc.Setters && desc.Setters.SetText !== undefined) {
@@ -1011,6 +1062,8 @@
 		if (titleBar) {
 			titleBar.textContent = `${model.formTitle}  (${model.formWidth}×${model.formHeight})  — ${model.receiverType}`;
 		}
+		renderMenuBar(canvas);
+		canvas.style.backgroundColor = cssColor(model.formProps && model.formProps.backColor);
 
 		const RP = globalThis.GoFormsRenderPlan;
 		// The tray is rendered separately and must not reach the plan: a
@@ -1023,6 +1076,43 @@
 
 		applyRenderPlan(plan);
 		updateSelectionClasses();
+	}
+
+	// renderMenuBar draws the form's MenuStrip above its client area, where
+	// the window puts it: a click on a menu selects the MenuStrip and opens
+	// its items in the property panel.
+	function renderMenuBar(canvas) {
+		const menu = model.controls.find((c) => c.type === 'MenuStrip');
+		let bar = canvas.querySelector('.form-menubar');
+		canvas.classList.toggle('has-menu', !!menu);
+		if (!menu) {
+			if (bar) bar.remove();
+			return;
+		}
+		if (!bar) {
+			bar = document.createElement('div');
+			bar.className = 'form-menubar';
+			canvas.appendChild(bar);
+		}
+		bar.innerHTML = '';
+		const tops = collectionOf(menu).filter((it) => !it.depth);
+		for (const it of tops.length ? tops : [{ text: '(empty menu)' }]) {
+			const m = document.createElement('span');
+			m.className = 'form-menu';
+			m.textContent = it.text;
+			m.title = `${menu.id}: edit the menu's items in the property panel`;
+			m.addEventListener('mousedown', (e) => {
+				e.stopPropagation();
+				const live = model.controls.find((c) => c.type === 'MenuStrip');
+				if (!live) return;
+				setSelection(live.id, false);
+				updateSelectionClasses();
+				renderProperties();
+				renderOutline();
+				revealGroup('Items');
+			});
+			bar.appendChild(m);
+		}
 	}
 
 	// ---------------------------------------------------------------------
@@ -1092,6 +1182,14 @@
 				return '🗂';
 			case 'ColorDialog':
 				return '🎨';
+			case 'MenuStrip':
+				return '☰';
+			case 'ContextMenu':
+				return '▤';
+			case 'ToolTip':
+				return '💬';
+			case 'BindingSource':
+				return '🔗';
 			default:
 				return '⚙';
 		}
@@ -1426,6 +1524,12 @@
 		el.style.fontSize = font && font.size ? font.size + 'px' : '';
 		el.style.fontWeight = font && font.bold ? '700' : '';
 		el.style.fontStyle = font && font.italic ? 'italic' : '';
+	}
+
+	// imageUrl is where the webview loads a picture of the form's folder.
+	function imageUrl(rel) {
+		if (!rel || !resourceBase) return '';
+		return resourceBase.replace(/\/$/, '') + '/' + String(rel).split('/').map(encodeURIComponent).join('/');
 	}
 
 	// cssColor turns the tool's "#rrggbb"/"#rrggbbaa" into CSS, or "".
@@ -1798,8 +1902,19 @@
 		return c;
 	}
 
-	function renderPictureBox() {
+	function renderPictureBox(spec) {
 		const c = contentBase('cc-picturebox');
+		const src = spec && imageUrl(propOr(spec, 'image', ''));
+		if (src) {
+			// The embedded picture itself, scaled into the box as the
+			// framework's default fill (contain) draws it.
+			const img = document.createElement('img');
+			img.className = 'cc-picture';
+			img.src = src;
+			img.alt = '';
+			c.appendChild(img);
+			return c;
+		}
 		c.innerHTML =
 			'<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5">' +
 			'<rect x="2" y="3" width="20" height="18" rx="1.5"/>' +
@@ -3344,6 +3459,7 @@
 		if (editableProps.length) {
 			appendPropsGroup(panel, spec, editableProps, desc);
 		}
+		if (!isComponent(spec)) appendExtenderGroups(panel, spec, desc);
 
 		if (desc && desc.Events && desc.Events.length) {
 			appendEventsGroup(panel, spec, desc.Events, desc);
@@ -3797,6 +3913,22 @@
 			row.appendChild(caption);
 		}
 
+		const dataProp = document.createElement('input');
+		dataProp.type = 'text';
+		dataProp.className = 'coll-field';
+		dataProp.value = col.dataPropertyName || '';
+		dataProp.placeholder = 'field';
+		dataProp.title = 'DataPropertyName: the field of a bound record this column shows';
+		dataProp.addEventListener('change', () => {
+			col.dataPropertyName = dataProp.value.trim();
+			if (!col.dataPropertyName) delete col.dataPropertyName;
+			commit();
+		});
+		dataProp.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') dataProp.blur();
+		});
+		row.appendChild(dataProp);
+
 		row.appendChild(
 			iconButton(col.hidden ? '🚫' : '👁', col.hidden ? 'Hidden: shown in code only' : 'Visible', () => {
 				col.hidden = !col.hidden;
@@ -3883,7 +4015,7 @@
 			// exist before the add call referencing it lands in the file.
 			const handlers = items
 				.filter((it) => it.kind !== 'separator' && it.handler)
-				.map((it) => ({ method: it.handler, paramType: 'none' }));
+				.map((it) => ({ method: it.handler, paramType: cd.HandlerArgs || 'none' }));
 			post({
 				type: 'apply',
 				ops: [{ op: 'setCollection', id: spec.id, collection: items }],
@@ -3977,7 +4109,9 @@
 			});
 			row.appendChild(text);
 
-			if (cd.Handler) {
+			// A menu bar's own entries are menus: no handler, always enabled.
+			const onBar = cd.TopLevel && depths && depths[i] === 0;
+			if (cd.Handler && !onBar) {
 				const handler = document.createElement('input');
 				handler.type = 'text';
 				handler.className = 'coll-handler';
@@ -4009,6 +4143,16 @@
 				});
 				row.appendChild(wire);
 			}
+		}
+
+		if (cd.InCtor && item.kind !== 'separator' && !(cd.TopLevel && depths && depths[i] === 0)) {
+			row.appendChild(
+				iconButton(item.disabled ? '⊘' : '✓', item.disabled ? 'Disabled - click to enable' : 'Enabled - click to disable', () => {
+					item.disabled = !item.disabled;
+					if (!item.disabled) delete item.disabled;
+					commit();
+				})
+			);
 		}
 
 		if (cd.Tree) {
@@ -4094,6 +4238,7 @@
 		for (const prop of Object.values(desc.Fields || {})) props.add(prop);
 		for (const prop of Object.keys(desc.Calls || {})) props.add(prop);
 		for (const prop of desc.CtorProps || []) props.add(prop);
+		for (const prop of desc.Special || []) props.add(prop);
 		props.delete('text');
 		return [...props].sort((a, b) => a.localeCompare(b));
 	}
@@ -4181,6 +4326,8 @@
 			return input;
 		};
 
+		if (kind.startsWith('ref:')) return refEditor(spec, prop, kind.slice(4), current, send);
+		if (kind === 'image') return imageEditor(spec, prop, current);
 		if (prop === 'anchor' && kind === 'flags') return anchorEditor(desc, prop, current, send);
 		if (prop === 'dock' && kind === 'enum') return dockEditor(desc, prop, current, send);
 
@@ -4258,6 +4405,155 @@
 			return input;
 		}
 		return textInput('text', current, send);
+	}
+
+	// refEditor picks one of the form's components of a type - the
+	// ContextMenu a control opens, the BindingSource a grid shows - or none.
+	function refEditor(spec, prop, type, current, send) {
+		const select = document.createElement('select');
+		const none = document.createElement('option');
+		none.value = '';
+		none.textContent = '(none)';
+		select.appendChild(none);
+		const ids = model.controls.filter((c) => c.type === type).map((c) => c.id);
+		for (const id of ids) {
+			const o = document.createElement('option');
+			o.value = id;
+			o.textContent = id;
+			if (id === current) o.selected = true;
+			select.appendChild(o);
+		}
+		select.value = current || '';
+		if (!ids.length) select.title = `Add a ${type} from the toolbox first`;
+		select.addEventListener('change', () => {
+			if (select.value) send(select.value);
+			else post({ type: 'apply', ops: [{ op: 'resetProp', id: spec.id, prop }] });
+		});
+		return select;
+	}
+
+	// imageEditor shows the picture and "…" to pick another. The extension
+	// copies the file into the form's folder and embeds it.
+	function imageEditor(spec, prop, current) {
+		const wrap = document.createElement('div');
+		wrap.className = 'image-editor';
+		const src = imageUrl(current);
+		if (src) {
+			const thumb = document.createElement('img');
+			thumb.className = 'image-thumb';
+			thumb.src = src;
+			thumb.alt = '';
+			wrap.appendChild(thumb);
+		}
+		const name = document.createElement('span');
+		name.className = 'image-name';
+		name.textContent = current || '(none)';
+		wrap.appendChild(name);
+		const pick = document.createElement('button');
+		pick.className = 'coll-btn';
+		pick.textContent = '…';
+		pick.title = 'Choose a picture - it is copied into the form\'s folder and embedded in the binary';
+		pick.addEventListener('click', () => post({ type: 'pickImage', id: spec.id, prop }));
+		wrap.appendChild(pick);
+		return wrap;
+	}
+
+	// appendExtenderGroups is what the form's components say about this
+	// control: "ToolTip on toolTip1", and the (DataBindings) of a control
+	// that can show a field of a record.
+	function appendExtenderGroups(panel, spec, desc) {
+		const tips = model.controls.filter((c) => c.type === 'ToolTip');
+		if (tips.length) {
+			const g = groupEl('Tool tips');
+			for (const tip of tips) {
+				const row = document.createElement('div');
+				row.className = 'prop-row';
+				row.dataset.prop = 'toolTip.' + tip.id;
+				const label = document.createElement('label');
+				label.textContent = `ToolTip on ${tip.id}`;
+				const current = (spec.toolTips && spec.toolTips[tip.id]) || '';
+				if (current) label.classList.add('modified');
+				const input = document.createElement('input');
+				input.type = 'text';
+				input.value = current;
+				input.dataset.initial = current;
+				input.addEventListener('change', () => post({ type: 'apply', ops: [{ op: 'setToolTip', id: spec.id, prop: tip.id, value: input.value }] }));
+				input.addEventListener('keydown', (e) => {
+					if (e.key === 'Enter') input.blur();
+				});
+				row.appendChild(label);
+				row.appendChild(input);
+				row.addEventListener('mouseenter', () => showHelp(`ToolTip on ${tip.id}`, 'The text shown when the mouse rests on the control. Empty shows none.'));
+				g.appendChild(row);
+			}
+			panel.appendChild(g);
+		}
+
+		const bindable = (desc && desc.Bindable) || [];
+		if (!bindable.length) return;
+		const sources = model.controls.filter((c) => c.type === 'BindingSource');
+		const g = groupEl('(DataBindings)');
+		if (!sources.length) {
+			const hint = document.createElement('div');
+			hint.className = 'hint';
+			hint.textContent = 'Add a BindingSource from the toolbox (Data) to bind this control to a field of a record.';
+			g.appendChild(hint);
+			panel.appendChild(g);
+			return;
+		}
+		for (const prop of bindable) {
+			const b = (spec.bindings && spec.bindings[prop]) || null;
+			const row = document.createElement('div');
+			row.className = 'prop-row';
+			row.dataset.prop = 'binding.' + prop;
+			const label = document.createElement('label');
+			label.textContent = prop;
+			if (b) label.classList.add('modified');
+			const source = document.createElement('select');
+			const none = document.createElement('option');
+			none.value = '';
+			none.textContent = '(none)';
+			source.appendChild(none);
+			for (const src of sources) {
+				const o = document.createElement('option');
+				o.value = src.id;
+				o.textContent = src.id;
+				source.appendChild(o);
+			}
+			source.value = b ? b.source : '';
+			const member = document.createElement('input');
+			member.type = 'text';
+			member.className = 'binding-member';
+			member.placeholder = 'Field';
+			member.value = b ? b.member : '';
+			member.dataset.initial = member.value;
+			const commit = () => {
+				const value = source.value && member.value.trim() ? `${source.value}.${member.value.trim()}` : '';
+				if (!value && !b) return;
+				post({ type: 'apply', ops: [{ op: 'setBinding', id: spec.id, prop, value }] });
+			};
+			source.addEventListener('change', commit);
+			member.addEventListener('change', commit);
+			member.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') member.blur();
+			});
+			row.appendChild(label);
+			row.appendChild(source);
+			row.appendChild(member);
+			row.addEventListener('mouseenter', () => showHelp(`${prop} binding`, `Shows the field of the BindingSource's current record, and writes it back when the user changes it.`));
+			g.appendChild(row);
+		}
+		panel.appendChild(g);
+	}
+
+	// columnsFromType makes a grid's columns from a struct's fields: a
+	// column per field, titled and bound by its name - what Visual Studio
+	// does when a grid's DataSource is set to a type.
+	function columnsFromType(id, fields) {
+		const spec = findControl(id);
+		if (!spec || !fields.length) return;
+		const columns = fields.map((f) => ({ title: f.name, dataPropertyName: f.name, kind: f.type === 'bool' ? 'CheckBox' : '' }));
+		post({ type: 'apply', ops: [{ op: 'setColumns', id, columns }] });
 	}
 
 	// anchorEditor is Anchor as Visual Studio edits it: a box with a bar to
@@ -4732,6 +5028,17 @@
 					post({ type: 'gotoHandler', id: spec.id, event: eventName, handler: current });
 				});
 				row.appendChild(gotoBtn);
+
+				// Unwiring keeps the method, as Visual Studio does when an
+				// event is cleared: the code someone wrote in it is theirs.
+				const unwire = document.createElement('button');
+				unwire.className = 'unwire-btn';
+				unwire.textContent = '✕';
+				unwire.title = `Unwire ${current} (the method stays in the code)`;
+				unwire.addEventListener('click', () => {
+					post({ type: 'apply', ops: [{ op: 'removeEvent', id: spec.id, event: eventName }] });
+				});
+				row.appendChild(unwire);
 			}
 
 			g.appendChild(row);
@@ -5022,6 +5329,7 @@
 				},
 			});
 			out.push({ label: 'Edit Columns…', run: () => revealGroup('Columns') });
+			out.push({ label: 'Columns from a Type…', run: () => post({ type: 'pickDataType', id: spec.id }) });
 		}
 		if (['ComboBox', 'ListBox', 'CheckedListBox', 'DomainUpDown'].includes(spec.type)) {
 			out.push({ label: 'Edit Items…', run: () => revealGroup('Items') });

@@ -27,6 +27,11 @@ type InboundMessage =
 	| { type: 'paste' }
 	| { type: 'viewCode' }
 	| { type: 'rescanToolbox' }
+	// A picture for an image property: the extension asks for the file,
+	// copies it into the form's folder and sets the property.
+	| { type: 'pickImage'; id: string; prop: string }
+	// "Columns from a type": the extension asks which struct.
+	| { type: 'pickDataType'; id: string }
 	| { type: 'setStartup' }
 	| { type: 'undo' }
 	| { type: 'redo' }
@@ -40,7 +45,11 @@ type OutboundMessage =
 	| { type: 'info'; message: string }
 	| { type: 'parseError'; message: string }
 	| { type: 'handlerWired'; result: import('./goTool').EnsureHandlerResult; model: FormModel }
-	| { type: 'pasteData'; data: unknown; sameForm: boolean };
+	| { type: 'pasteData'; data: unknown; sameForm: boolean }
+	| { type: 'dataType'; id: string; fields: { name: string; type: string }[] }
+	// Where the form's folder is served to the webview, so a picture can be
+	// drawn on the canvas.
+	| { type: 'resourceBase'; uri: string };
 
 /**
  * What Ctrl+C put on the designer's clipboard, and which form it came from.
@@ -115,6 +124,10 @@ class DesignerDocumentSession {
 			// no go.mod, or a package that does not parse: no group
 		}
 
+		this.post({
+			type: 'resourceBase',
+			uri: this.webviewPanel.webview.asWebviewUri(vscode.Uri.file(path.dirname(filePath))).toString(),
+		});
 		try {
 			const model = await this.tool.parse(filePath);
 			this.lastModel = model;
@@ -191,6 +204,14 @@ class DesignerDocumentSession {
 
 			case 'rescanToolbox':
 				await this.sendInit();
+				return;
+
+			case 'pickImage':
+				await this.pickImage(message.id, message.prop);
+				return;
+
+			case 'pickDataType':
+				await this.pickDataType(message.id);
 				return;
 
 			case 'setStartup':
@@ -289,6 +310,53 @@ class DesignerDocumentSession {
 		} catch (err) {
 			this.post({ type: 'error', message: describeError(err) });
 		}
+	}
+
+	/**
+	 * Asks for a picture and copies it into the form's `resources/` folder -
+	 * go:embed only reaches files inside the package - then sets the
+	 * property to it. A file already there with the same content is reused;
+	 * a different one by that name gets a number.
+	 */
+	private async pickImage(id: string, prop: string): Promise<void> {
+		const filePath = this.document.uri.fsPath;
+		const picked = await vscode.window.showOpenDialog({
+			canSelectMany: false,
+			title: 'Choose a picture',
+			filters: { Pictures: ['png', 'jpg', 'jpeg', 'gif', 'svg'] },
+		});
+		if (!picked?.length) return;
+		try {
+			const rel = copyIntoForm(filePath, picked[0].fsPath);
+			await this.handleMessage({ type: 'apply', ops: [{ op: 'setProp', id, prop, value: rel }] });
+		} catch (err) {
+			this.post({ type: 'error', message: describeError(err) });
+		}
+	}
+
+	/** Asks which of the project's structs a grid's columns are made from. */
+	private async pickDataType(id: string): Promise<void> {
+		let types: import('./goTool').DataType[] = [];
+		try {
+			types = await this.tool.projectTypes(this.document.uri.fsPath);
+		} catch (err) {
+			this.post({ type: 'error', message: describeError(err) });
+			return;
+		}
+		if (!types.length) {
+			this.post({ type: 'info', message: 'The project has no exported struct with exported fields to make columns from.' });
+			return;
+		}
+		const pick = await vscode.window.showQuickPick(
+			types.map((t) => ({
+				label: `${t.package}.${t.name}`,
+				description: t.fields.map((f) => f.name).join(', '),
+				detail: t.import,
+				t,
+			})),
+			{ title: 'GoForms: Columns from a type', placeHolder: 'The records the grid will show' }
+		);
+		if (pick) this.post({ type: 'dataType', id, fields: pick.t.fields });
 	}
 
 	/** Jumps straight to an already-wired event handler's method definition,
@@ -417,6 +485,34 @@ export function restoreForm(snap: FormSnapshot): void {
 	}
 }
 
+/**
+ * Copies a picture into the form's resources folder and returns its path
+ * relative to the form's folder, as the image property takes it. A picture
+ * already inside the folder is used where it is.
+ */
+export function copyIntoForm(designerPath: string, source: string): string {
+	const formDir = path.dirname(designerPath);
+	const rel = path.relative(formDir, source);
+	if (!rel.startsWith('..') && !path.isAbsolute(rel)) {
+		return rel.split(path.sep).join('/');
+	}
+	const dir = path.join(formDir, 'resources');
+	fs.mkdirSync(dir, { recursive: true });
+	const data = fs.readFileSync(source);
+	const ext = path.extname(source);
+	// go:embed takes names without spaces or the like most simply.
+	const stem = path.basename(source, ext).replace(/[^A-Za-z0-9_.-]+/g, '-') || 'picture';
+	for (let n = 1; ; n++) {
+		const name = n === 1 ? `${stem}${ext}` : `${stem}-${n}${ext}`;
+		const dest = path.join(dir, name);
+		if (!fs.existsSync(dest)) {
+			fs.writeFileSync(dest, data);
+			return `resources/${name}`;
+		}
+		if (fs.readFileSync(dest).equals(data)) return `resources/${name}`;
+	}
+}
+
 function describeError(err: unknown): string {
 	if (err instanceof Error) {
 		return err.message;
@@ -443,7 +539,12 @@ export class GoFormsDesignerEditorProvider implements vscode.CustomTextEditorPro
 	): Promise<void> {
 		webviewPanel.webview.options = {
 			enableScripts: true,
-			localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')],
+			// The form's own folder too: its embedded pictures are drawn on
+			// the canvas from there.
+			localResourceRoots: [
+				vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+				vscode.Uri.file(path.dirname(document.uri.fsPath)),
+			],
 		};
 
 		webviewPanel.webview.html = this.buildHtml(webviewPanel.webview);

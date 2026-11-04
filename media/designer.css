@@ -2340,3 +2340,96 @@ body {
 	cursor: pointer;
 	font-size: 11px;
 }
+
+/* The form's MenuStrip, drawn where the window puts its menu bar: between
+   the title and the client area. */
+#form-canvas.has-menu {
+	margin-top: 22px;
+}
+
+#form-canvas.has-menu .form-titlebar {
+	top: -44px;
+}
+
+#form-canvas .form-menubar {
+	position: absolute;
+	top: -22px;
+	left: -1px;
+	right: -1px;
+	height: 22px;
+	display: flex;
+	gap: 2px;
+	padding: 0 4px;
+	align-items: center;
+	font-size: 12px;
+	background: var(--vscode-editorWidget-background, #f3f3f3);
+	border: 1px solid var(--vscode-panel-border, #666);
+	border-bottom: none;
+}
+
+.form-menu {
+	padding: 1px 8px;
+	cursor: pointer;
+}
+
+.form-menu:hover {
+	background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.2));
+}
+
+/* Pictures. */
+.cc-picture {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+.image-editor {
+	flex: 1 1 auto;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.image-thumb {
+	width: 28px;
+	height: 28px;
+	object-fit: contain;
+	border: 1px solid var(--vscode-input-border, #555);
+}
+
+.image-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-size: 11px;
+	opacity: 0.8;
+}
+
+.binding-member {
+	width: 90px;
+}
+
+.unwire-btn {
+	border: none;
+	background: none;
+	color: var(--vscode-foreground);
+	opacity: 0.6;
+	cursor: pointer;
+}
+
+.unwire-btn:hover {
+	opacity: 1;
+}
+
+.coll-field {
+	width: 70px;
+	flex: 0 1 70px;
+	min-width: 0;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, transparent);
+	font-size: 12px;
+	padding: 2px 4px;
+}

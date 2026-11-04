@@ -479,9 +479,8 @@ func parseFile(path string) (*parseResult, error) {
 		res.model.RadioGroups = append(res.model.RadioGroups, g.spec)
 	}
 
-	res.model.Note = "Only the control types listed in the designer palette are recognized here; " +
-		"anything else in initializeComponent (MenuStrip, ContextMenu, ToolTip, Load/Closing wiring, ...) " +
-		"is left completely untouched by apply."
+	res.model.Note = "Only the controls and statements the designer models are rewritten; " +
+		"anything else in initializeComponent is left exactly as written."
 
 	return res, nil
 }
