@@ -31,6 +31,7 @@ import (
 	"go/ast"
 	"go/format"
 	"os"
+	"sort"
 )
 
 // reorderFile rewrites path so every control's block follows its parent's,
@@ -198,33 +199,93 @@ func planBlockOrder(r *parseResult, only map[string]bool, want func(order []stri
 // only the blocks that have to move. It returns nil if the parent links form
 // a cycle, which only a hand-written file could manage.
 func parentsFirst(r *parseResult, order []string) []string {
-	placed := make(map[string]bool, len(order))
 	has := make(map[string]bool, len(order))
 	for _, id := range order {
 		has[id] = true
 	}
+	deps := blockDeps(r)
 
+	// A depth-first walk in file order: each control is put down right
+	// after whatever it waits for - its container, and every other control
+	// its block names (the ToolTip it gets a tip from, the ContextMenu it is
+	// attached to, the BindingSource it shows). So only the blocks that have
+	// to move move, and only as far as they have to. A dependency with no
+	// block of its own here - the Form, or a container written in a way
+	// this tool does not model - constrains nothing.
+	const (
+		unseen = iota
+		visiting
+		done
+	)
+	state := make(map[string]int, len(order))
 	out := make([]string, 0, len(order))
-	rest := order
-	for len(rest) > 0 {
-		var deferred []string
-		for _, id := range rest {
-			// A parent with no block of its own here - the Form, or a container
-			// written in a way this tool does not model - constrains nothing.
-			parent := r.controls[id].spec.Parent
-			if parent != "" && has[parent] && !placed[parent] {
-				deferred = append(deferred, id)
-				continue
-			}
-			out = append(out, id)
-			placed[id] = true
+	var visit func(id string) bool
+	visit = func(id string) bool {
+		switch state[id] {
+		case done:
+			return true
+		case visiting:
+			return false // a cycle
 		}
-		if len(deferred) == len(rest) {
+		state[id] = visiting
+		var ds []string
+		for d := range deps[id] {
+			if has[d] {
+				ds = append(ds, d)
+			}
+		}
+		// In file order, so the result does not depend on map iteration.
+		pos := make(map[string]int, len(order))
+		for k, o := range order {
+			pos[o] = k
+		}
+		sort.Slice(ds, func(a, b int) bool { return pos[ds[a]] < pos[ds[b]] })
+		for _, d := range ds {
+			if !visit(d) {
+				return false
+			}
+		}
+		state[id] = done
+		out = append(out, id)
+		return true
+	}
+	for _, id := range order {
+		if !visit(id) {
 			return nil
 		}
-		rest = deferred
 	}
 	return out
+}
+
+// blockDeps names, for each control, the other controls its block cannot
+// run before: its container, and every control a statement of its block
+// mentions.
+func blockDeps(r *parseResult) map[string]map[string]bool {
+	deps := map[string]map[string]bool{}
+	add := func(id, dep string) {
+		if dep == "" || dep == id {
+			return
+		}
+		if deps[id] == nil {
+			deps[id] = map[string]bool{}
+		}
+		deps[id][dep] = true
+	}
+	for id, pc := range r.controls {
+		add(id, pc.spec.Parent)
+	}
+	if r.initBody != nil {
+		for _, st := range r.initBody.List {
+			owner := stmtOwner(r, st)
+			if owner == "" {
+				continue
+			}
+			for _, ref := range stmtRefs(r, st) {
+				add(owner, ref)
+			}
+		}
+	}
+	return deps
 }
 
 // stmtOwner names the control whose block a statement belongs to, or "" for
@@ -268,9 +329,45 @@ func callOwner(r *parseResult, e ast.Expr) string {
 		}
 		return ""
 	}
+	if about := aboutControl(r, call); about != "" {
+		return about
+	}
 	if parts, isChain := selChain(call.Fun); isChain && len(parts) >= 2 && parts[0] == r.model.RecvVar {
 		if _, known := r.controls[parts[1]]; known {
 			return parts[1]
+		}
+	}
+	return ""
+}
+
+// aboutControl names the control a call configures when it is called on
+// something else: a ToolTip giving it a tip, a BindingSource binding it,
+// the Form taking a MenuStrip as its menu. Such a line belongs to that
+// control's block - it says something about it, and it has to run after it
+// is made - which is where the designer writes it.
+func aboutControl(r *parseResult, call *ast.CallExpr) string {
+	parts, isChain := selChain(call.Fun)
+	if !isChain || len(call.Args) == 0 || parts[0] != r.model.RecvVar {
+		return ""
+	}
+	arg := func() string {
+		if p, ok := selChain(call.Args[0]); ok && len(p) == 2 && p[0] == r.model.RecvVar {
+			if _, known := r.controls[p[1]]; known {
+				return p[1]
+			}
+		}
+		return ""
+	}
+	switch {
+	case len(parts) == 2 && parts[1] == "SetMainMenu" && len(call.Args) == 1:
+		return arg()
+	case len(parts) == 3:
+		pc, known := r.controls[parts[1]]
+		if !known {
+			return ""
+		}
+		if (pc.spec.Type == "ToolTip" && parts[2] == "SetToolTip") || (pc.spec.Type == "BindingSource" && parts[2] == "Bind") {
+			return arg()
 		}
 	}
 	return ""

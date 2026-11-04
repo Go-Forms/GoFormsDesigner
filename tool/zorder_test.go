@@ -147,3 +147,18 @@ func TestRemovingTheLastDatePickerDropsTheTimeImport(t *testing.T) {
 		t.Errorf("the unused import survived:\n%s", src)
 	}
 }
+
+func TestRemoveEventUnwiresAndKeepsTheMethodName(t *testing.T) {
+	path := writeFixture(t, designerFixture)
+	mustApply(t, path, Op{Op: "setEvent", ID: "lblWelcome", Event: "Click", Handler: "lbl_Click"},
+		Op{Op: "setEvent", Event: "Load", Handler: "form_Load"})
+	model, src := mustApply(t, path, Op{Op: "removeEvent", ID: "lblWelcome", Event: "Click"}, Op{Op: "removeEvent", Event: "Load"})
+	if strings.Contains(src, ".Handle(") {
+		t.Errorf("a wiring survived:\n%s", src)
+	}
+	if len(findControl(t, model, "lblWelcome").Events) != 0 || len(model.FormEvents) != 0 {
+		t.Errorf("events still read back")
+	}
+	// Unwiring what is not wired is a no-op.
+	mustApply(t, path, Op{Op: "removeEvent", ID: "lblWelcome", Event: "Click"})
+}

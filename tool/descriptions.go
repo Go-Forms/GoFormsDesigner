@@ -51,6 +51,11 @@ var propDescriptions = map[string]string{
 	"initialDirectory": "The folder the dialog opens in.",
 	"defaultFileName":  "The file name the dialog suggests.",
 	"message":          "The text shown above the colors.",
+	"contextMenu":      "The ContextMenu that opens when the control is right-clicked. Add one from the toolbox's Menus & Toolbars group.",
+	"dataSource":       "The BindingSource whose records this shows: a row, or an item, per record. Add one from the toolbox's Data group and give it its records in code with SetDataSource.",
+	"displayMember":    "The field of each record the list shows. Empty shows the record printed.",
+	"image":            "The picture shown, copied into the form's folder and embedded in the binary with go:embed, so it travels with the program.",
+	"icon":             "The window's icon, embedded in the binary with go:embed.",
 	"fixedSize":        "Whether the user can resize the window.",
 	"autoScroll":       "Whether the form scrolls when its controls do not fit in it.",
 	"centerOnScreen":   "Whether the window opens in the middle of the screen.",
@@ -100,6 +105,8 @@ var eventDescriptions = map[string]string{
 	"ItemCheck":            "An item's check box was ticked or cleared.",
 	"MaskCompleted":        "Every required position of the mask has been filled in.",
 	"SelectedItemChanged":  "A different item was selected.",
+	"PositionChanged":      "The current record changed - a row was selected, or MoveNext was called.",
+	"ListChanged":          "The records were replaced, or ResetBindings was called.",
 }
 
 // descriptionsFor collects the entries for one type's properties and events,

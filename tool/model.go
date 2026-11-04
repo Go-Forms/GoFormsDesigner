@@ -26,6 +26,8 @@ type CollectionItem struct {
 	// Nesting is expressed as a depth rather than a parent index so the zero
 	// value means "root" and a flat list needs no extra bookkeeping.
 	Depth int `json:"depth,omitempty"`
+	// Disabled is a menu item made with SetEnabled(false).
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // GridColumnSpec is one DataGridView column as the designer edits it: the
@@ -47,6 +49,8 @@ type GridColumnSpec struct {
 	// ButtonText is the fixed caption on a button column's buttons. Empty
 	// means each cell's own value is its caption.
 	ButtonText string `json:"buttonText,omitempty"`
+	// DataPropertyName is the field of a bound record the column shows.
+	DataPropertyName string `json:"dataPropertyName,omitempty"`
 }
 
 // CellSpec is where a control sits in a TableLayoutPanel: its column and
@@ -68,6 +72,12 @@ type CellSpec struct {
 type TrackSpec struct {
 	Type  string  `json:"type"`
 	Value float64 `json:"value,omitempty"`
+}
+
+// BindingSpec is one simple binding: the BindingSource and the field.
+type BindingSpec struct {
+	Source string `json:"source"`
+	Member string `json:"member"`
 }
 
 // ControlSpec is one recognized control instance.
@@ -117,6 +127,12 @@ type ControlSpec struct {
 	// Group is the RadioButtonGroup field name this RadioButton belongs to,
 	// if any.
 	Group string `json:"group,omitempty"`
+	// ToolTips is the tip each ToolTip on the form gives this control, by
+	// the ToolTip's ID: `mf.toolTip1.SetToolTip(mf.btn, "Saves the file")`.
+	ToolTips map[string]string `json:"toolTips,omitempty"`
+	// Bindings ties a property to a field of a BindingSource's current
+	// record, by property: `mf.bs.Bind(mf.txtName, "Text", "Name")`.
+	Bindings map[string]BindingSpec `json:"bindings,omitempty"`
 	// Cell is this control's place in the TableLayoutPanel it is in, when
 	// the file names one (AddControlAt/AddControlSpanning).
 	Cell *CellSpec `json:"cell,omitempty"`
@@ -190,7 +206,7 @@ type FormModel struct {
 
 // Op is one mutation requested by the extension via `apply`.
 type Op struct {
-	Op string `json:"op"` // "setBounds" | "setText" | "setItems" | "setCollection" | "setColumns" | "setProp" | "resetProp" | "setEvent" | "add" | "remove" | "setParent" | "setForm" | "rename" | "reorder" | "setCell" | "setTable"
+	Op string `json:"op"` // "setBounds" | "setText" | "setItems" | "setCollection" | "setColumns" | "setProp" | "resetProp" | "setEvent" | "removeEvent" | "add" | "remove" | "setParent" | "setForm" | "rename" | "reorder" | "setCell" | "setTable" | "setToolTip" | "setBinding"
 	// ID is unused (leave empty) for "setForm", which resizes the Form
 	// itself (W/H) rather than a specific control.
 	ID     string `json:"id"`
@@ -236,6 +252,10 @@ type Op struct {
 	// TableColumns/TableRows are the complete new track lists for "setTable".
 	TableColumns []TrackSpec `json:"tableColumns,omitempty"`
 	TableRows    []TrackSpec `json:"tableRows,omitempty"`
+	// ToolTips and Bindings carry a copied control's tips and bindings for
+	// "add" (a paste).
+	ToolTips map[string]string      `json:"toolTips,omitempty"`
+	Bindings map[string]BindingSpec `json:"bindings,omitempty"`
 	// Custom describes a project control for "add" (see project.go): the
 	// designer has it from the toolbox, the tool from scanning the module.
 	Custom *CustomType `json:"custom,omitempty"`

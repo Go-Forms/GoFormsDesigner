@@ -154,3 +154,30 @@ func TestAddRefusesAProjectControlDescribedAsSomethingElse(t *testing.T) {
 		t.Fatal("accepted a type key that does not match its description")
 	}
 }
+
+func TestTheProjectsRecordTypesAreListed(t *testing.T) {
+	root, _ := projectModule(t)
+	if err := os.WriteFile(filepath.Join(root, "Controls/Widgets/models.go"), []byte("package widgets\n\ntype Customer struct {\n\tID   int\n\tName string\n\tnote string\n\tTags []string\n}\n\ntype hidden struct{ A int }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	types, err := projectTypes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var customer *DataType
+	for i := range types {
+		if types[i].Name == "Customer" {
+			customer = &types[i]
+		}
+		if types[i].Name == "hidden" {
+			t.Error("an unexported type was listed")
+		}
+	}
+	if customer == nil {
+		t.Fatalf("Customer not found in %+v", types)
+	}
+	want := []DataField{{"ID", "int"}, {"Name", "string"}, {"Tags", "[]string"}}
+	if len(customer.Fields) != 3 || customer.Fields[0] != want[0] || customer.Fields[2] != want[2] {
+		t.Errorf("fields %+v", customer.Fields)
+	}
+}

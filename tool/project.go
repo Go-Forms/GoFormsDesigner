@@ -362,3 +362,109 @@ func importAlias(r *parseResult, c *CustomType) (alias string, add string) {
 	}
 	return alias, alias + " " + strconv.Quote(c.Import)
 }
+
+// DataType is a struct of the project a grid's columns can be made from:
+// its exported fields, in order.
+type DataType struct {
+	Import  string      `json:"import"`
+	Package string      `json:"package"`
+	Name    string      `json:"name"`
+	Fields  []DataField `json:"fields"`
+}
+
+// DataField is one exported field of a DataType.
+type DataField struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// projectTypes lists the module's exported structs with exported fields -
+// the records a BindingSource holds - for "Columns from a type".
+func projectTypes(dir string) ([]DataType, error) {
+	root, module, err := findModule(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []DataType
+	err = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if p != root && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || name == "vendor" || name == "testdata" || name == "node_modules" || name == "build") {
+			return filepath.SkipDir
+		}
+		rel, _ := filepath.Rel(root, p)
+		imp := module
+		if rel != "." {
+			imp = path.Join(module, filepath.ToSlash(rel))
+		}
+		out = append(out, scanTypes(p, imp)...)
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].Package+"."+out[i].Name < out[j].Package+"."+out[j].Name })
+	return out, err
+}
+
+func scanTypes(dir, importPath string) []DataType {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []DataType
+	for _, e := range entries {
+		n := e.Name()
+		if e.IsDir() || !strings.HasSuffix(n, ".go") || strings.HasSuffix(n, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, n), nil, parser.SkipObjectResolution)
+		if err != nil {
+			continue
+		}
+		for _, decl := range f.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.TYPE {
+				continue
+			}
+			for _, sp := range gd.Specs {
+				ts, ok := sp.(*ast.TypeSpec)
+				if !ok || !ts.Name.IsExported() {
+					continue
+				}
+				st, ok := ts.Type.(*ast.StructType)
+				if !ok {
+					continue
+				}
+				dt := DataType{Import: importPath, Package: f.Name.Name, Name: ts.Name.Name}
+				for _, field := range st.Fields.List {
+					for _, fn := range field.Names {
+						if fn.IsExported() {
+							dt.Fields = append(dt.Fields, DataField{Name: fn.Name, Type: exprString(field.Type)})
+						}
+					}
+				}
+				if len(dt.Fields) > 0 {
+					out = append(out, dt)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// exprString prints a field's type the way it is written.
+func exprString(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.Ident:
+		return v.Name
+	case *ast.SelectorExpr:
+		return exprString(v.X) + "." + v.Sel.Name
+	case *ast.StarExpr:
+		return "*" + exprString(v.X)
+	case *ast.ArrayType:
+		return "[]" + exprString(v.Elt)
+	case *ast.MapType:
+		return "map[" + exprString(v.Key) + "]" + exprString(v.Value)
+	}
+	return "?"
+}

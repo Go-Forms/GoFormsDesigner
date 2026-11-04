@@ -156,6 +156,10 @@ func ctorCall(spec *ControlSpec, recvVar string) (string, error) {
 		return fmt.Sprintf("goforms.NewSplitContainer(%s, %s, %s)", fnum(spec.W), fnum(spec.H), vertical), nil
 	case "ColorPickerButton":
 		return fmt.Sprintf("goforms.NewColorPickerButton(%s, %s.Form)", quote(spec.Text), recvVar), nil
+	case "MenuStrip", "ContextMenu":
+		return menuCtor(recvVar, spec, desc.Collection, "New"+spec.Type)
+	case "ToolTip", "BindingSource":
+		return fmt.Sprintf("goforms.New%s()", spec.Type), nil
 	case "Timer":
 		// One second, because a timer added from the toolbox and left alone
 		// should be visibly a timer rather than a busy loop.
@@ -203,7 +207,7 @@ func controlBlock(recvVar string, spec *ControlSpec, parentType, indent string) 
 	sort.Strings(props)
 	for _, p := range props {
 		method, _ := setterForProp(desc, p)
-		val, err := formatPropValue(desc, p, spec.Props[p])
+		val, err := formatPropValue(recvVar, desc, p, spec.Props[p])
 		if err != nil {
 			return "", err
 		}
@@ -228,6 +232,12 @@ func controlBlock(recvVar string, spec *ControlSpec, parentType, indent string) 
 	b.WriteString(collectionLines(recvVar, spec, indent))
 	b.WriteString(columnLines(recvVar, spec, indent))
 	b.WriteString(tableLines(recvVar, spec, indent))
+	b.WriteString(extenderLines(recvVar, spec, indent))
+
+	if spec.Type == "MenuStrip" {
+		// The form's menu bar is the one thing a MenuStrip is for.
+		fmt.Fprintf(&b, "%s%s.SetMainMenu(%s.%s)\n", indent, recvVar, recvVar, spec.ID)
+	}
 
 	if nonVisual {
 		// No AddControl: a Timer is not on the form. The Start() call, if
@@ -263,7 +273,7 @@ func fieldLines(recvVar string, spec *ControlSpec, desc *ControlDesc, indent str
 	var b strings.Builder
 	for _, p := range props {
 		field, _ := fieldForProp(desc, p)
-		val, err := formatPropValue(desc, p, spec.Props[p])
+		val, err := formatPropValue(recvVar, desc, p, spec.Props[p])
 		if err != nil {
 			continue // an unparseable value is left out rather than written broken
 		}
@@ -338,7 +348,7 @@ func containerExpr(recvVar, parent, parentType, slot string) string {
 // added control's block.
 func collectionLines(recvVar string, spec *ControlSpec, indent string) string {
 	cd := collectionFor(spec.Type)
-	if cd == nil || len(spec.Collection) == 0 {
+	if cd == nil || cd.InCtor || len(spec.Collection) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -391,6 +401,9 @@ func columnLines(recvVar string, spec *ControlSpec, indent string) string {
 		}
 		if c.Hidden {
 			fmt.Fprintf(&b, "%s%s.%s.SetColumnHidden(%d, true)\n", indent, recvVar, spec.ID, i)
+		}
+		if c.DataPropertyName != "" {
+			fmt.Fprintf(&b, "%s%s.%s.SetColumnDataPropertyName(%d, %s)\n", indent, recvVar, spec.ID, i, quote(c.DataPropertyName))
 		}
 	}
 	return b.String()

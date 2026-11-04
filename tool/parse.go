@@ -84,6 +84,15 @@ type pcontrol struct {
 	// setterStmts spans each single-value setter call by prop name, so
 	// "resetProp" can delete the line that sets it.
 	setterStmts map[string]ByteRangeTok
+	// tipStmts and bindStmts span the SetToolTip calls giving this control a
+	// tip, by ToolTip, and the Bind calls binding its properties, by
+	// property (see extenders.go).
+	tipStmts, bindStmts map[string]ByteRangeTok
+	// ctorCall is the constructor call, for the types whose items live in it
+	// (a menu - see menus.go).
+	ctorCall *ast.CallExpr
+	// imageVar is the go:embed variable a PictureBox's LoadBytes names.
+	imageVar string
 }
 
 // ByteRangeTok mirrors ByteRange but in token.Pos terms, before conversion
@@ -104,8 +113,10 @@ type pform struct {
 	singleArgs map[string]ast.Expr
 	// setterStmts spans each `<recv>.SetXxx(v)` call by prop, for resetProp.
 	setterStmts map[string]ByteRangeTok
-	callStmts   map[string]ByteRangeTok
-	eventStmts  map[string]ByteRangeTok
+	// iconVar is the go:embed variable the form's SetIcon names.
+	iconVar    string
+	callStmts  map[string]ByteRangeTok
+	eventStmts map[string]ByteRangeTok
 	// anchor is the end of the last statement about the form, which is where
 	// a new one goes. The form's settings stay together at the top of
 	// initializeComponent, above the controls, which is both how a hand-
@@ -146,6 +157,7 @@ type parseResult struct {
 	model *FormModel
 
 	controls map[string]*pcontrol // by ID, includes unfinished ones
+	embeds   map[string]*embedVar // the file's go:embed variables, by name
 	groups   map[string]*pgroup
 	order    []string // control IDs in AddControl-encounter order
 	form     *pform   // the Form's own settings; never nil
@@ -309,6 +321,8 @@ func parseFile(path string) (*parseResult, error) {
 			FormEvents:  map[string]string{},
 		},
 	}
+
+	res.readEmbeds()
 
 	// 1. Find the receiver struct type: `type X struct { *goforms.Form; ... }`.
 	var receiverType string
@@ -527,7 +541,7 @@ func (r *parseResult) visitCollectionStmt(stmt ast.Stmt, recvVar string) bool {
 		return false
 	}
 	cd := collectionFor(pc.spec.Type)
-	if cd == nil {
+	if cd == nil || cd.InCtor {
 		return false
 	}
 	method := parts[2]
@@ -684,6 +698,8 @@ func (r *parseResult) visitAssign(s *ast.AssignStmt, recvVar string) {
 		colStyles:   map[int]TrackSpec{},
 		rowStyles:   map[int]TrackSpec{},
 		setterStmts: map[string]ByteRangeTok{},
+		tipStmts:    map[string]ByteRangeTok{},
+		bindStmts:   map[string]ByteRangeTok{},
 	}
 	if desc.NonVisual {
 		// Nothing later will finalize a tray component - there is no
@@ -864,6 +880,8 @@ func (r *parseResult) visitAssign(s *ast.AssignStmt, recvVar string) {
 				pc.textArg = call.Args[0]
 			}
 		}
+	case "MenuStrip", "ContextMenu":
+		r.readMenu(pc, desc.Collection, call)
 	case "Timer":
 		// The interval is a constructor argument, so setProp replaces it
 		// there rather than appending an assignment to Timer.Interval - two
@@ -905,6 +923,8 @@ func (r *parseResult) visitCustom(s *ast.AssignStmt, fieldName string, desc *Con
 		colStyles:   map[int]TrackSpec{},
 		rowStyles:   map[int]TrackSpec{},
 		setterStmts: map[string]ByteRangeTok{},
+		tipStmts:    map[string]ByteRangeTok{},
+		bindStmts:   map[string]ByteRangeTok{},
 	}
 }
 
@@ -978,8 +998,31 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 	if !ok || len(parts) < 2 || parts[0] != recvVar {
 		return
 	}
+	if r.visitExtender(s, call, parts, recvVar) {
+		return
+	}
 
 	switch {
+	// mf.SetIcon(goforms.NewResource("app.png", formIcon)) - the form's
+	// icon, embedded (see embeds.go).
+	case len(parts) == 2 && parts[1] == "SetIcon" && len(call.Args) == 1:
+		if inner, ok := call.Args[0].(*ast.CallExpr); ok {
+			if fp, ok := selChain(inner.Fun); ok && len(fp) == 2 && fp[0] == goformsPkg && fp[1] == "NewResource" {
+				if p, v, ok := r.imageFromArgs(inner.Args); ok {
+					r.model.FormProps["icon"] = p
+					r.form.iconVar = v
+				}
+			}
+		}
+		r.form.setterStmts["icon"] = ByteRangeTok{Start: s.Pos(), End: s.End()}
+		r.form.anchor = maxPos(r.form.anchor, s.End())
+
+	// mf.SetMainMenu(mf.menuStrip1) - the last line of a MenuStrip's block.
+	case len(parts) == 2 && parts[1] == "SetMainMenu":
+		if pc := r.controlArg(call, recvVar); pc != nil && pc.spec.Type == "MenuStrip" {
+			pc.lastEnd = maxPos(pc.lastEnd, s.End())
+		}
+
 	// mf.SetClientSize(w, h) - see clientSizeArgs' doc comment for why this
 	// must be tracked and kept in sync with goforms.NewForm's own w/h.
 	case len(parts) == 2 && parts[1] == "SetClientSize":
@@ -1138,7 +1181,7 @@ func (r *parseResult) visitExprStmt(s *ast.ExprStmt, recvVar string) {
 // per-column setters.
 func isColumnSetter(method string) bool {
 	switch method {
-	case "SetColumnKind", "SetColumnHidden", "SetColumnButtonText":
+	case "SetColumnKind", "SetColumnHidden", "SetColumnButtonText", "SetColumnDataPropertyName":
 		return true
 	}
 	return false
@@ -1175,6 +1218,10 @@ func (r *parseResult) applyColumnSetter(pc *pcontrol, method string, args []ast.
 	case "SetColumnButtonText":
 		if v, ok := litString(args[1]); ok {
 			col.ButtonText = v
+		}
+	case "SetColumnDataPropertyName":
+		if v, ok := litString(args[1]); ok {
+			col.DataPropertyName = v
 		}
 	}
 }
@@ -1343,6 +1390,13 @@ func (r *parseResult) applySetter(pc *pcontrol, method string, args []ast.Expr) 
 			}
 		}
 		return ""
+	case "LoadBytes":
+		if p, v, ok := r.imageFromArgs(args); ok {
+			pc.spec.Props["image"] = p
+			pc.imageVar = v
+			return "image"
+		}
+		return ""
 	case "SetValue":
 		if len(args) == 1 {
 			if v, ok := litFloat(args[0]); ok {
@@ -1373,6 +1427,12 @@ func (r *parseResult) applySetter(pc *pcontrol, method string, args []ast.Expr) 
 // the designer can't round-trip (a variable, an expression, a call) - the
 // file keeps working, the property panel just shows nothing for it.
 func readPropValue(arg ast.Expr, kind string) (string, bool) {
+	if strings.HasPrefix(kind, KindRefPrefix) {
+		if parts, ok := selChain(arg); ok && len(parts) == 2 {
+			return parts[1], true
+		}
+		return "", false
+	}
 	switch kind {
 	case KindBool:
 		if b, ok := arg.(*ast.Ident); ok && (b.Name == "true" || b.Name == "false") {

@@ -52,7 +52,12 @@ func (mf *MainForm) initializeComponent() {
 	designer := filepath.Join(root, "Forms/MainForm/MainForm-designer.go")
 
 	sample := func(desc *ControlDesc, prop string) string {
+		if t := refKind(kindOf(desc, prop)); t != "" {
+			return "c" + t // the component of that type added below
+		}
 		switch kindOf(desc, prop) {
+		case KindImage:
+			return "resources/dot.png"
 		case KindBool:
 			return "true"
 		case KindNumber:
@@ -75,7 +80,16 @@ func (mf *MainForm) initializeComponent() {
 			types = append(types, typ)
 		}
 	}
-	sort.Strings(types)
+	// Components first, so the controls' references to them - a
+	// ContextMenu, a BindingSource - have something to name.
+	sort.Slice(types, func(i, j int) bool {
+		a, b := catalog[types[i]].NonVisual, catalog[types[j]].NonVisual
+		if a != b {
+			return a
+		}
+		return types[i] < types[j]
+	})
+	write("Forms/MainForm/resources/dot.png", "\x89PNG\r\n\x1a\n")
 
 	var ops []Op
 	var handlers []string
@@ -100,8 +114,33 @@ func (mf *MainForm) initializeComponent() {
 			arg, _ := eventArgType(desc, ev)
 			handlers = append(handlers, h+" "+arg)
 		}
-		ops = append(ops, Op{Op: "add", ID: id, Type: typ, X: 1, Y: 1, W: 50, H: 50, Text: typ, Props: props, Events: events})
+		var special []Op
+		for _, p := range desc.Special {
+			special = append(special, Op{Op: "setProp", ID: id, Prop: p, Value: sample(desc, p)})
+			delete(props, p)
+		}
+		var tips map[string]string
+		var binds map[string]BindingSpec
+		if !desc.NonVisual {
+			tips = map[string]string{"cToolTip": "tip"}
+			for _, p := range desc.Bindable {
+				binds = map[string]BindingSpec{p: {Source: "cBindingSource", Member: "Name"}}
+			}
+		}
+		var items []CollectionItem
+		if cd := desc.Collection; cd != nil && cd.InCtor {
+			h := id + "_Item"
+			items = []CollectionItem{{Text: "Top"}, {Text: "Item", Depth: 1, Handler: h, Disabled: true}, {Kind: "separator", Depth: 1}, {Text: "Sub", Depth: 1}, {Text: "Leaf", Depth: 2}}
+			if cd.TopLevel == "" {
+				items[0].Handler = id + "_Top"
+				handlers = append(handlers, id+"_Top EventArgs")
+			}
+			handlers = append(handlers, h+" EventArgs")
+		}
+		ops = append(ops, Op{Op: "add", ID: id, Type: typ, X: 1, Y: 1, W: 50, H: 50, Text: typ, Props: props, Events: events, ToolTips: tips, Bindings: binds, Collection: items})
+		ops = append(ops, special...)
 	}
+	ops = append(ops, Op{Op: "setProp", Prop: "icon", Value: "resources/dot.png"})
 	ops = append(ops,
 		Op{Op: "setTable", ID: "cTableLayoutPanel",
 			TableColumns: []TrackSpec{{Type: "Absolute", Value: 40}, {Type: "Percent", Value: 100}},
@@ -139,6 +178,35 @@ func (mf *MainForm) initializeComponent() {
 	if out, err := buildWasm(root); err != nil {
 		src, _ := os.ReadFile(designer)
 		t.Fatalf("generated code does not build:\n%s\n--- designer file ---\n%s", out, src)
+	}
+
+	// And the tool reads back everything it wrote.
+	back, err := parseFile(designer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range back.model.Controls {
+		desc := catalog[c.Type]
+		if c.ID != "c"+c.Type {
+			continue // the extra controls added after the sweep
+		}
+		if !c.Supported || c.CollectionReadOnly || c.TableReadOnly {
+			t.Errorf("%s read back as unsupported or read-only", c.ID)
+		}
+		if desc != nil && !desc.NonVisual && desc.Custom == nil && c.ToolTips["cToolTip"] != "tip" {
+			t.Errorf("%s lost its tip", c.ID)
+		}
+		if desc != nil && len(desc.Bindable) > 0 && c.Bindings[desc.Bindable[0]].Member != "Name" {
+			t.Errorf("%s lost its binding", c.ID)
+		}
+		for _, p := range desc.Special {
+			if c.Props[p] != "resources/dot.png" {
+				t.Errorf("%s.%s reads %q", c.ID, p, c.Props[p])
+			}
+		}
+	}
+	if back.model.FormProps["icon"] != "resources/dot.png" {
+		t.Errorf("the form's icon reads %q", back.model.FormProps["icon"])
 	}
 }
 

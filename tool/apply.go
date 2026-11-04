@@ -151,6 +151,9 @@ func planOp(r *parseResult, op Op) ([]edit, error) {
 	case "setColumns":
 		return planSetColumns(r, op)
 	case "setProp":
+		if isImageProp(r, op) {
+			return planImageOp(r, op, op.Value)
+		}
 		return one(planSetProp(r, op))
 	case "setEvent":
 		return one(planSetEvent(r, op))
@@ -167,7 +170,16 @@ func planOp(r *parseResult, op Op) ([]edit, error) {
 	case "reorder":
 		return planReorderOp(r, op)
 	case "resetProp":
+		if isImageProp(r, op) {
+			return planImageOp(r, op, "")
+		}
 		return one(planResetProp(r, op))
+	case "removeEvent":
+		return one(planRemoveEvent(r, op))
+	case "setToolTip":
+		return one(planSetToolTip(r, op))
+	case "setBinding":
+		return one(planSetBinding(r, op))
 	case "setCell":
 		return one(planSetCell(r, op))
 	case "setTable":
@@ -325,6 +337,10 @@ func planSetCollection(r *parseResult, op Op) ([]edit, error) {
 	next := *pc.spec
 	next.Collection = op.Collection
 
+	if cd.InCtor {
+		return planSetMenu(r, pc, cd, op.Collection)
+	}
+
 	occupied := occupiedSlots(r, op.ID)
 	// Pages are identified by position, so a shorter list drops the last
 	// pages - and any control standing on one would be left referring to a
@@ -459,7 +475,7 @@ func planFormProp(r *parseResult, op Op) (*edit, error) {
 	if setter == "" {
 		return nil, fmt.Errorf("the form has no property %q", op.Prop)
 	}
-	text, err := formatPropValue(formDesc, op.Prop, op.Value)
+	text, err := formatPropValue(r.model.RecvVar, formDesc, op.Prop, op.Value)
 	if err != nil {
 		return nil, err
 	}
@@ -534,7 +550,12 @@ func planSetProp(r *parseResult, op Op) (*edit, error) {
 		return planCallProp(r, pc, op, method)
 	}
 
-	text, err := formatPropValue(desc, op.Prop, op.Value)
+	if refType := refKind(kindOf(desc, op.Prop)); refType != "" {
+		if err := checkRef(r, op.Prop, refType, op.Value); err != nil {
+			return nil, err
+		}
+	}
+	text, err := formatPropValue(r.model.RecvVar, desc, op.Prop, op.Value)
 	if err != nil {
 		return nil, err
 	}
@@ -602,6 +623,48 @@ func planCallProp(r *parseResult, pc *pcontrol, op Op, method string) (*edit, er
 	return &edit{insertAt, insertAt, stmt}, nil
 }
 
+// isImageProp reports whether a setProp/resetProp is about a picture.
+func isImageProp(r *parseResult, op Op) bool {
+	if op.ID == "" {
+		return kindOf(formDesc, op.Prop) == KindImage
+	}
+	pc, ok := r.controls[op.ID]
+	return ok && kindOf(catalog[pc.spec.Type], op.Prop) == KindImage
+}
+
+func planImageOp(r *parseResult, op Op, value string) ([]edit, error) {
+	if op.ID == "" {
+		return planImageProp(r, nil, op.Prop, value)
+	}
+	pc, err := mustControl(r, op.ID)
+	if err != nil {
+		return nil, err
+	}
+	return planImageProp(r, pc, op.Prop, value)
+}
+
+// planRemoveEvent unwires an event: the Handle line goes, the handler
+// method stays in the code, as Visual Studio leaves it when an event is
+// cleared in the property grid.
+func planRemoveEvent(r *parseResult, op Op) (*edit, error) {
+	var rng ByteRangeTok
+	var found bool
+	if op.ID == "" {
+		rng, found = r.form.eventStmts[op.Event]
+	} else {
+		pc, err := mustControl(r, op.ID)
+		if err != nil {
+			return nil, err
+		}
+		rng, found = pc.eventStmts[op.Event]
+	}
+	if !found {
+		return nil, nil // not wired: nothing to do
+	}
+	start, end := wholeLines(r.src, offset(r.fset, rng.Start), offset(r.fset, rng.End))
+	return &edit{start, end, ""}, nil
+}
+
 // planResetProp puts a property back to its default by deleting the
 // statement that sets it - which is what "default" means in a designer file:
 // a property nobody set. It is the ↺ beside a modified property, as in the
@@ -642,10 +705,41 @@ func planResetProp(r *parseResult, op Op) (*edit, error) {
 	return &edit{start, end, ""}, nil
 }
 
+// refKind is the component type a "ref:<Type>" kind names, or "".
+func refKind(kind string) string {
+	t, _ := strings.CutPrefix(kind, KindRefPrefix)
+	if t == kind {
+		return ""
+	}
+	return t
+}
+
+// checkRef refuses a reference to a component that is not on the form, or
+// is not the kind the property takes: `SetContextMenu(mf.timer1)` would not
+// compile.
+func checkRef(r *parseResult, prop, refType, id string) error {
+	pc, ok := r.controls[id]
+	if !ok {
+		return fmt.Errorf("%s: there is no %q on the form", prop, id)
+	}
+	if pc.spec.Type != refType {
+		return fmt.Errorf("%s takes a %s, and %s is a %s", prop, refType, id, pc.spec.Type)
+	}
+	return nil
+}
+
 // formatPropValue renders a property value as the Go expression its setter
-// expects, per the prop's declared kind.
-func formatPropValue(desc *ControlDesc, prop, value string) (string, error) {
-	switch kindOf(desc, prop) {
+// expects, per the prop's declared kind. recvVar is the receiver a
+// reference to another component of the form is written through.
+func formatPropValue(recvVar string, desc *ControlDesc, prop, value string) (string, error) {
+	kind := kindOf(desc, prop)
+	if refKind(kind) != "" {
+		if err := validateGoIdent(value); err != nil {
+			return "", fmt.Errorf("property %q: %w", prop, err)
+		}
+		return recvVar + "." + value, nil
+	}
+	switch kind {
 	case KindBool:
 		if value != "true" && value != "false" {
 			return "", fmt.Errorf("property %q is a bool, got %q", prop, value)
@@ -840,6 +934,21 @@ func planAdd(r *parseResult, op Op) ([]edit, error) {
 			return nil, err
 		}
 	}
+	// A paste brings its tips and bindings; the components they name have
+	// to be on this form.
+	if err := checkExtenders(r, &ControlSpec{Type: op.Type, ToolTips: op.ToolTips, Bindings: op.Bindings}); err != nil {
+		return nil, err
+	}
+	spec.ToolTips, spec.Bindings = op.ToolTips, op.Bindings
+	if desc := catalog[op.Type]; desc != nil {
+		for p, v := range op.Props {
+			if refType := refKind(kindOf(desc, p)); refType != "" {
+				if err := checkRef(r, p, refType, v); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	// A tab control with no tabs (or a tree with no nodes) renders as an
 	// empty box, which reads as a broken drop rather than a new control - so
 	// seed the types that declare a default item list.
@@ -1015,12 +1124,36 @@ func planRemove(r *parseResult, op Op) ([]edit, error) {
 	}
 
 	var edits []edit
+	doomed := map[string]bool{}
 	for _, id := range append([]string{op.ID}, descendantsOf(r, op.ID)...) {
 		pc, ok := r.controls[id]
 		if !ok {
 			continue
 		}
+		doomed[id] = true
 		edits = appendControlDeletes(edits, r, pc)
+		if pc.imageVar != "" {
+			edits = appendEmbedDelete(edits, r, pc.imageVar)
+		}
+	}
+	// The lines in other controls' blocks that name one of these - a
+	// button's SetContextMenu, a grid's SetDataSource - go too: they would
+	// refer to a field that no longer exists. Only lines a control owns are
+	// touched; hand-written code naming the control is left for the
+	// compiler to point at.
+	if r.initBody != nil {
+		for _, st := range r.initBody.List {
+			owner := stmtOwner(r, st)
+			if owner == "" || doomed[owner] {
+				continue
+			}
+			for _, ref := range stmtRefs(r, st) {
+				if doomed[ref] {
+					edits = addLineDelete(edits, r.src, offset(r.fset, st.Pos()), offset(r.fset, st.End()))
+					break
+				}
+			}
+		}
 	}
 	return edits, nil
 }

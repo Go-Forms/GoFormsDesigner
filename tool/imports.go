@@ -10,6 +10,7 @@ package main
 // file is missing, as part of the same atomic batch as the control itself.
 
 import (
+	"bytes"
 	"go/ast"
 	"go/token"
 	"os"
@@ -114,6 +115,12 @@ func pruneImports(path string) error {
 		}
 		if imp.Name != nil {
 			name = imp.Name.Name
+		}
+		// The blank embed import is used by the go:embed directives, which
+		// a reference count cannot see: it goes with the last of them.
+		if name == "_" && p == "embed" && !bytes.Contains(r.src, []byte("//go:embed ")) {
+			edits = addLineDelete(edits, r.src, offset(r.fset, imp.Pos()), offset(r.fset, imp.End()))
+			continue
 		}
 		if name == "_" || name == "." || used[name] {
 			continue

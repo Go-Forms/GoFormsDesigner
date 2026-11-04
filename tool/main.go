@@ -15,6 +15,7 @@
 //	goformsdesigner theme-apply <name-styles.go>   (ops JSON array on stdin)
 //	goformsdesigner set-startup <main.go> <designer.go>
 //	goformsdesigner project-controls <file-or-dir-in-module>
+//	goformsdesigner project-types <file-or-dir-in-module>
 //	goformsdesigner catalog
 //	goformsdesigner categories
 package main
@@ -28,7 +29,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		stderrf("usage: goformsdesigner parse|apply|tidy|theme-parse|theme-apply|ensure-handler|set-startup|project-controls|catalog|categories ...")
+		stderrf("usage: goformsdesigner parse|apply|tidy|theme-parse|theme-apply|ensure-handler|set-startup|project-controls|project-types|catalog|categories ...")
 		os.Exit(2)
 	}
 
@@ -50,6 +51,8 @@ func main() {
 		err = cmdSetStartup(os.Args[2:])
 	case "project-controls":
 		err = cmdProjectControls(os.Args[2:])
+	case "project-types":
+		err = cmdProjectTypes(os.Args[2:])
 	case "catalog":
 		err = cmdCatalog()
 	case "categories":
@@ -274,6 +277,25 @@ func cmdProjectControls(args []string) error {
 	return printJSON(out)
 }
 
+// cmdProjectTypes lists the project's structs a grid can be bound to.
+func cmdProjectTypes(args []string) error {
+	if len(args) != 1 {
+		return errUsage("project-types <file-or-dir-in-module>")
+	}
+	dir := args[0]
+	if st, err := os.Stat(dir); err == nil && !st.IsDir() {
+		dir = filepath.Dir(dir)
+	}
+	types, err := projectTypes(dir)
+	if err != nil {
+		return err
+	}
+	if types == nil {
+		types = []DataType{}
+	}
+	return printJSON(types)
+}
+
 // cmdCategories emits the toolbox groups in display order, so the designer's
 // Controls tab doesn't have to hardcode either the names or their sequence.
 func cmdCategories() error {
@@ -305,5 +327,6 @@ func propNames(desc *ControlDesc) []string {
 	for p := range desc.Calls {
 		out = append(out, p)
 	}
+	out = append(out, desc.Special...)
 	return append(out, desc.CtorProps...)
 }

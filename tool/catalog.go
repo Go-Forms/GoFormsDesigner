@@ -85,6 +85,13 @@ type ControlDesc struct {
 	// what makes parse.go recognize the add calls, apply.go regenerate them
 	// and the webview show a list editor - all from this one entry.
 	Collection *CollectionDesc `json:",omitempty"`
+	// Special names the props written by code of their own rather than by
+	// one of the four shapes above - a picture embedded with go:embed is a
+	// variable and a LoadBytes call (see embeds.go).
+	Special []string `json:",omitempty"`
+	// Bindable lists the properties BindingSource.Bind can tie to a field
+	// of a record, for the panel's (DataBindings) group.
+	Bindable []string `json:",omitempty"`
 	// Custom is set for a control of the project's own (see project.go):
 	// where it comes from and how it is constructed.
 	Custom *CustomType `json:",omitempty"`
@@ -139,6 +146,17 @@ type CollectionDesc struct {
 	// box that reads as a broken drop - the same reasoning as DataGridView's
 	// seeded columns in codegen.go.
 	Default []CollectionItem
+	// InCtor marks a collection written as the constructor's arguments - a
+	// menu, `goforms.NewContextMenu(item, item...)` - rather than as add
+	// calls after it, so "setCollection" rewrites the constructor (see
+	// menus.go).
+	InCtor bool `json:",omitempty"`
+	// TopLevel names the constructor depth-0 items are made with when it is
+	// not the items' own: a MenuStrip's NewTopMenu.
+	TopLevel string `json:",omitempty"`
+	// HandlerArgs is the event-args type an item's handler takes; empty is
+	// the parameterless func() a ToolStrip button's callback is.
+	HandlerArgs string `json:",omitempty"`
 }
 
 // baseEvents are the interaction events ControlBase gives every control
@@ -189,7 +207,9 @@ var formDesc = &ControlDesc{
 		"autoScroll": KindBool,
 		"backColor":  KindColor,
 		"padding":    KindPadding,
+		"icon":       KindImage,
 	},
+	Special: []string{"icon"},
 	// CenterOnScreen takes no argument, so it is a bool written as a bare
 	// call - the same shape a Timer's Start() has.
 	Calls: map[string]string{"centerOnScreen": "CenterOnScreen"},
@@ -278,35 +298,45 @@ const (
 	KindColor   = "color"
 	KindFont    = "font"
 	KindPadding = "padding"
+	// KindRefPrefix starts a kind that is a reference to another component
+	// of the form: "ref:ContextMenu" is written `mf.cmsGrid` and read back
+	// as "cmsGrid". The designer offers the form's components of that type.
+	KindRefPrefix = "ref:"
+	// KindImage is a picture embedded in the binary: the wire value is its
+	// path relative to the form's folder, and the file gets a
+	// `//go:embed` variable of its own (see embeds.go).
+	KindImage = "image"
 )
 
 // baseProps are the properties every control inherits from ControlBase (see
 // GoForms/control.go). They are merged into each type's own Setters by the
 // catalog command, the same way baseEvents are.
 var baseProps = map[string]string{
-	"SetAnchor":    "anchor",
-	"SetDock":      "dock",
-	"SetTabIndex":  "tabIndex",
-	"SetTabStop":   "tabStop",
-	"SetVisible":   "visible",
-	"SetEnabled":   "enabled",
-	"SetForeColor": "foreColor",
-	"SetBackColor": "backColor",
-	"SetFont":      "font",
-	"SetPadding":   "padding",
+	"SetAnchor":      "anchor",
+	"SetDock":        "dock",
+	"SetTabIndex":    "tabIndex",
+	"SetTabStop":     "tabStop",
+	"SetVisible":     "visible",
+	"SetEnabled":     "enabled",
+	"SetForeColor":   "foreColor",
+	"SetBackColor":   "backColor",
+	"SetFont":        "font",
+	"SetPadding":     "padding",
+	"SetContextMenu": "contextMenu",
 }
 
 var basePropKinds = map[string]string{
-	"anchor":    KindFlags,
-	"dock":      KindEnum,
-	"tabIndex":  KindNumber,
-	"tabStop":   KindBool,
-	"visible":   KindBool,
-	"enabled":   KindBool,
-	"foreColor": KindColor,
-	"backColor": KindColor,
-	"font":      KindFont,
-	"padding":   KindPadding,
+	"anchor":      KindFlags,
+	"dock":        KindEnum,
+	"tabIndex":    KindNumber,
+	"tabStop":     KindBool,
+	"visible":     KindBool,
+	"enabled":     KindBool,
+	"foreColor":   KindColor,
+	"backColor":   KindColor,
+	"font":        KindFont,
+	"padding":     KindPadding,
+	"contextMenu": KindRefPrefix + "ContextMenu",
 }
 
 var basePropEnums = map[string][]string{
@@ -413,6 +443,13 @@ func writerForProp(desc *ControlDesc, prop string) (how string, ok bool) {
 	if isCtorProp(desc, prop) {
 		return "constructor argument", true
 	}
+	if desc != nil {
+		for _, p := range desc.Special {
+			if p == prop {
+				return "special", true
+			}
+		}
+	}
 	return "", false
 }
 
@@ -426,7 +463,8 @@ func isNonVisual(typ string) bool {
 // catalog is keyed by ControlDesc.Type.
 var catalog = map[string]*ControlDesc{
 	"Label": {
-		Type: "Label", Ctors: []string{"NewLabel"}, DefaultW: 120, DefaultH: 24,
+		Bindable: []string{"Text"},
+		Type:     "Label", Ctors: []string{"NewLabel"}, DefaultW: 120, DefaultH: 24,
 		Setters: map[string]string{"SetText": "text"},
 	},
 	"Button": {
@@ -436,31 +474,37 @@ var catalog = map[string]*ControlDesc{
 		// other control's, carrying MouseEventArgs (see baseEvents).
 	},
 	"TextBox": {
-		Type: "TextBox", Ctors: []string{"NewTextBox", "NewMultilineTextBox", "NewPasswordTextBox"},
+		Bindable: []string{"Text"},
+		Type:     "TextBox", Ctors: []string{"NewTextBox", "NewMultilineTextBox", "NewPasswordTextBox"},
 		DefaultW: 160, DefaultH: 30,
 		Setters: map[string]string{"SetText": "text", "SetPlaceholder": "placeholder"},
 		Events:  []string{"TextChanged"},
 	},
 	"CheckBox": {
-		Type: "CheckBox", Ctors: []string{"NewCheckBox"}, DefaultW: 160, DefaultH: 24,
+		Bindable: []string{"Checked"},
+		Type:     "CheckBox", Ctors: []string{"NewCheckBox"}, DefaultW: 160, DefaultH: 24,
 		Setters: map[string]string{"SetText": "text", "SetChecked": "checked"},
 		Kinds:   map[string]string{"checked": KindBool},
 		Events:  []string{"CheckedChanged"},
 	},
 	"RadioButton": {
-		Type: "RadioButton", Ctors: []string{"NewRadioButton"}, DefaultW: 90, DefaultH: 24,
+		Bindable: []string{"Checked"},
+		Type:     "RadioButton", Ctors: []string{"NewRadioButton"}, DefaultW: 90, DefaultH: 24,
 		Setters: map[string]string{"SetText": "text", "SetChecked": "checked"},
 		Kinds:   map[string]string{"checked": KindBool},
 		Events:  []string{"CheckedChanged"},
 	},
 	"ComboBox": {
 		Type: "ComboBox", Ctors: []string{"NewComboBox"}, DefaultW: 150, DefaultH: 30,
-		Setters: map[string]string{"SetPlaceholder": "placeholder"},
+		Setters: map[string]string{"SetPlaceholder": "placeholder", "SetDataSource": "dataSource", "SetDisplayMember": "displayMember"},
+		Kinds:   map[string]string{"dataSource": KindRefPrefix + "BindingSource"},
 		Events:  []string{"SelectedIndexChanged"},
 	},
 	"ListBox": {
 		Type: "ListBox", Ctors: []string{"NewListBox"}, DefaultW: 150, DefaultH: 120,
-		Events: []string{"SelectedIndexChanged"},
+		Setters: map[string]string{"SetDataSource": "dataSource", "SetDisplayMember": "displayMember"},
+		Kinds:   map[string]string{"dataSource": KindRefPrefix + "BindingSource"},
+		Events:  []string{"SelectedIndexChanged"},
 	},
 	"Panel": {
 		Type: "Panel", Ctors: []string{"NewPanel"}, DefaultW: 200, DefaultH: 150,
@@ -473,16 +517,22 @@ var catalog = map[string]*ControlDesc{
 	},
 	"PictureBox": {
 		Type: "PictureBox", Ctors: []string{"NewPictureBox"}, DefaultW: 100, DefaultH: 100,
+		// The picture is embedded in the binary: a go:embed variable and a
+		// LoadBytes call, written by embeds.go.
+		Kinds:   map[string]string{"image": KindImage},
+		Special: []string{"image"},
 	},
 	"ProgressBar": {
 		Type: "ProgressBar", Ctors: []string{"NewProgressBar"}, DefaultW: 150, DefaultH: 20,
 	},
 	"TrackBar": {
-		Type: "TrackBar", Ctors: []string{"NewTrackBar"}, DefaultW: 150, DefaultH: 30,
+		Bindable: []string{"Value"},
+		Type:     "TrackBar", Ctors: []string{"NewTrackBar"}, DefaultW: 150, DefaultH: 30,
 		Events: []string{"ValueChanged"},
 	},
 	"NumericUpDown": {
-		Type: "NumericUpDown", Ctors: []string{"NewNumericUpDown"}, DefaultW: 90, DefaultH: 26,
+		Bindable: []string{"Value"},
+		Type:     "NumericUpDown", Ctors: []string{"NewNumericUpDown"}, DefaultW: 90, DefaultH: 26,
 		Events: []string{"ValueChanged"},
 	},
 	"DateTimePicker": {
@@ -491,7 +541,8 @@ var catalog = map[string]*ControlDesc{
 		Imports: []string{"time"},
 	},
 	"LinkLabel": {
-		Type: "LinkLabel", Ctors: []string{"NewLinkLabel", "NewLinkLabelWithURL"}, DefaultW: 100, DefaultH: 24,
+		Bindable: []string{"Text"},
+		Type:     "LinkLabel", Ctors: []string{"NewLinkLabel", "NewLinkLabelWithURL"}, DefaultW: 100, DefaultH: 24,
 		Setters: map[string]string{"SetText": "text"},
 		Events:  []string{"LinkClicked"},
 	},
@@ -541,12 +592,14 @@ var catalog = map[string]*ControlDesc{
 		IsContainer: true,
 	},
 	"MaskedTextBox": {
-		Type: "MaskedTextBox", Ctors: []string{"NewMaskedTextBox"}, DefaultW: 160, DefaultH: 30,
+		Bindable: []string{"Text"},
+		Type:     "MaskedTextBox", Ctors: []string{"NewMaskedTextBox"}, DefaultW: 160, DefaultH: 30,
 		Setters: map[string]string{"SetText": "text", "SetPlaceholder": "placeholder", "SetMask": "mask"},
 		Events:  []string{"TextChanged", "MaskCompleted"},
 	},
 	"RichTextBox": {
-		Type: "RichTextBox", Ctors: []string{"NewRichTextBox"}, DefaultW: 300, DefaultH: 150,
+		Bindable: []string{"Text"},
+		Type:     "RichTextBox", Ctors: []string{"NewRichTextBox"}, DefaultW: 300, DefaultH: 150,
 		Setters: map[string]string{"SetText": "text", "SetWordWrap": "wordWrap"},
 		Kinds:   map[string]string{"wordWrap": KindBool},
 	},
@@ -636,6 +689,7 @@ var catalog = map[string]*ControlDesc{
 			"SetGridLines":           "gridLines",
 			"SetFrozenColumns":       "frozenColumns",
 			"SetFrozenRows":          "frozenRows",
+			"SetDataSource":          "dataSource",
 		},
 		Kinds: map[string]string{
 			"rowHeight":     KindNumber,
@@ -647,6 +701,7 @@ var catalog = map[string]*ControlDesc{
 			"gridLines":     KindBool,
 			"frozenColumns": KindNumber,
 			"frozenRows":    KindNumber,
+			"dataSource":    KindRefPrefix + "BindingSource",
 		},
 		Enums: map[string][]string{
 			"scrollBars":  {"ScrollBarsNone", "ScrollBarsHorizontal", "ScrollBarsVertical", "ScrollBarsBoth"},
@@ -703,6 +758,35 @@ var catalog = map[string]*ControlDesc{
 		Type: "ColorDialog", Ctors: []string{"NewColorDialog"}, NonVisual: true,
 		Fields: map[string]string{"Title": "title", "Message": "message"},
 	},
+	// The form's menu bar, and a menu a control pops on right-click. Both are
+	// one constructor call holding the whole tree of items (see menus.go);
+	// a MenuStrip is also the form's menu, which is one more line.
+	"MenuStrip": {
+		Type: "MenuStrip", Ctors: []string{"NewMenuStrip"}, NonVisual: true,
+		Collection: &CollectionDesc{
+			Label: "Items", Tree: true, Handler: true, Separator: true,
+			InCtor: true, TopLevel: "NewTopMenu", HandlerArgs: "EventArgs",
+			Default: []CollectionItem{{Text: "File"}, {Text: "Exit", Depth: 1}},
+		},
+	},
+	"ContextMenu": {
+		Type: "ContextMenu", Ctors: []string{"NewContextMenu"}, NonVisual: true,
+		Collection: &CollectionDesc{
+			Label: "Items", Tree: true, Handler: true, Separator: true,
+			InCtor: true, HandlerArgs: "EventArgs",
+			Default: []CollectionItem{{Text: "Copy"}, {Text: "Paste"}},
+		},
+	},
+	// A tip shown over any control: an extender, as in WinForms - each
+	// control on the form gets a "ToolTip on toolTip1" (see extenders.go).
+	"ToolTip": {
+		Type: "ToolTip", Ctors: []string{"NewToolTip"}, NonVisual: true,
+	},
+	// Records and a position, that grids, lists and fields are bound to.
+	"BindingSource": {
+		Type: "BindingSource", Ctors: []string{"NewBindingSource"}, NonVisual: true,
+		Events: []string{"PositionChanged", "ListChanged"},
+	},
 }
 
 // Filter is deliberately absent from the dialog entries above: it is a
@@ -737,6 +821,10 @@ var controlCategory = map[string]string{
 	"SaveFileDialog":      CategoryComponents,
 	"FolderBrowserDialog": CategoryComponents,
 	"ColorDialog":         CategoryComponents,
+	"ToolTip":             CategoryComponents,
+	"MenuStrip":           CategoryMenus,
+	"ContextMenu":         CategoryMenus,
+	"BindingSource":       CategoryData,
 }
 
 // init fills in each type's Category so the catalog command has it without
