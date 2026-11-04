@@ -36,6 +36,8 @@ carries it over.
 - **Bring to Front / Send to Back** reorder the AddControl calls, which is
   what z-order is here - the child added last is drawn on top - and, as in
   WinForms, the docking order too.
+- **A form's Shown event** (GoForms v0.4.0), raised once after Load the
+  first time the form is on screen, is in its events list.
 - **The side panel resizes** by its left edge, as the Visual Studio
   property window does, and remembers its width; a double-click puts it back.
   The column and menu item editors had been squeezed into 270 pixels.

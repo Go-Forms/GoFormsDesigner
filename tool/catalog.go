@@ -216,7 +216,7 @@ var formDesc = &ControlDesc{
 	// The Form's own events, on top of the ones every control has. Closing
 	// carries a *CancelEventArgs: a handler has to be able to say no, which
 	// a value copy could not.
-	Events:    []string{"Load", "Closing", "Closed"},
+	Events:    []string{"Load", "Shown", "Closing", "Closed"},
 	EventArgs: map[string]string{"Closing": "*CancelEventArgs"},
 }
 

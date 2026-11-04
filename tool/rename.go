@@ -283,7 +283,7 @@ func init() {
 	for name := range baseEvents {
 		formMembers[name] = true
 	}
-	for _, name := range []string{"Load", "Closing", "Closed"} {
+	for _, name := range []string{"Load", "Shown", "Closing", "Closed"} {
 		formMembers[name] = true
 	}
 }

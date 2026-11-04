@@ -93,6 +93,7 @@ var eventDescriptions = map[string]string{
 	"ValueChanged":         "The value changed.",
 	"Tick":                 "The interval elapsed. Raised again every interval while the timer runs.",
 	"Load":                 "The form is about to be shown for the first time.",
+	"Shown":                "The form has just been shown for the first time.",
 	"Closing":              "The form is about to close. Set e.Cancel to keep it open.",
 	"Closed":               "The form has closed.",
 	"CellClick":            "A cell was clicked.",
